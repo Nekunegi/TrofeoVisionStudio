@@ -368,6 +368,47 @@ aside h3 .tag {
   font-weight: 500;
 }
 
+/* widget palette search box */
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.palette-search:focus-within {
+  border-color: rgba(77, 225, 255, 0.55);
+  background: rgba(77, 225, 255, 0.04);
+}
+.palette-search svg { color: var(--faint); flex-shrink: 0; }
+.palette-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  padding: 0;
+}
+.palette-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* palette category rows */
+.palette-cat + .palette-cat { margin-top: 12px; }
+.palette-cat-label {
+  color: var(--sub);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 6px;
+  opacity: 0.75;
+}
+
 /* add-widget icon grid */
 .btns {
   display: grid;

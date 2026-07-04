@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type Konva from 'konva'
 import {
-  Activity, Clock as ClockIcon, Type, Gauge as GaugeIcon, ChartLine, ChartBar,
-  ImagePlus, Upload, RotateCcw, MonitorCog, Palette,
+  Upload, RotateCcw, MonitorCog, Palette,
   MousePointerClick, Bookmark, Zap, Copy, BringToFront, SendToBack, Bell,
-  Music, CloudSun, AudioLines, Layers,
+  Layers,
 } from 'lucide-react'
 import DashboardStage, { type LcdToast } from './DashboardStage'
 import { useBackend } from './useBackend'
@@ -16,12 +15,13 @@ import {
   type Layout, type Widget, type Sensors,
 } from './types'
 import { LS_KEY, loadLayout } from './layoutStore'
-import { fileToDataUrl, fileToWidgetImage } from './imageUtils'
+import { fileToDataUrl } from './imageUtils'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { SensorReadout } from './components/SensorReadout'
 import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
 import { LayerPanel } from './components/LayerPanel'
+import { WidgetPalette } from './components/WidgetPalette'
 import './App.css'
 
 let idc = 0
@@ -421,45 +421,7 @@ export default function App() {
         <aside>
           <section>
             <h3><Zap size={13} />Add widget</h3>
-            <div className="btns">
-              <button className="wbtn" onClick={() => addWidget({ id: newId('sensor'), type: 'sensor',
-                metric: 'cpuTemp', label: 'CPU', unit: '°C', x: 200, y: 200, fontSize: 120,
-                color: '#00ffd0', bold: true })}><Activity size={17} />Sensor</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('gauge'), type: 'gauge',
-                metric: 'cpuLoad', max: 100, size: 300, color: '#00ffd0', label: 'CPU',
-                x: 800, y: 80 })}><GaugeIcon size={17} />Gauge</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('graph'), type: 'graph',
-                metric: 'gpuLoad', label: 'GPU LOAD', max: 100, x: 200, y: 150,
-                width: 600, height: 220, color: '#b18cff' })}><ChartLine size={17} />Graph</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('bar'), type: 'bar',
-                metric: 'cpuLoad', label: 'CPU LOAD', x: 200, y: 300, width: 500, height: 20,
-                max: 100, color: '#00ffd0' })}><ChartBar size={17} />Bar</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('clock'), type: 'clock',
-                withDate: false, x: 200, y: 200, fontSize: 80, color: '#ffffff',
-                bold: false })}><ClockIcon size={17} />Clock</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('text'), type: 'text',
-                text: 'TEXT', x: 200, y: 200, fontSize: 60, color: '#ffffff',
-                bold: false })}><Type size={17} />Text</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('media'), type: 'media',
-                x: 200, y: 160, width: 620, height: 160, color: '#4de1ff',
-                panelBlur: 12 })}><Music size={17} />Media</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('weather'), type: 'weather',
-                place: '東京', lat: 35.6895, lon: 139.6917, x: 240, y: 140,
-                width: 470, height: 170, color: '#ffd76a',
-                panelBlur: 12 })}><CloudSun size={17} />Weather</button>
-              <button className="wbtn" onClick={() => addWidget({ id: newId('viz'), type: 'visualizer',
-                x: 510, y: 130, width: 900, height: 220, bars: 48, color: '#00ffd0',
-                centered: true })}><AudioLines size={17} />Audio</button>
-              <label className="wbtn"><ImagePlus size={17} />Image
-                <input type="file" accept="image/*" hidden onChange={async (e) => {
-                  const f = e.target.files?.[0]; if (!f) return
-                  const { src, w, h } = await fileToWidgetImage(f)
-                  const fit = Math.min(1, 400 / w, 400 / h) // drop in at a sane size
-                  addWidget({ id: newId('img'), type: 'image', src, x: 200, y: 100,
-                    width: Math.round(w * fit), height: Math.round(h * fit) })
-                }} />
-              </label>
-            </div>
+            <WidgetPalette newId={newId} onAdd={addWidget} />
           </section>
 
           <section>
