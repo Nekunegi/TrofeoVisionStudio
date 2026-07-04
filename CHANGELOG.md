@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-07-05
+
 ### Added
 - **First-run wizard**: modal shown once on the very first launch. Live
   status pills for backend WS link, LCD detection, CPU-temperature
@@ -108,4 +110,5 @@ Highlights: PyInstaller-bundled backend, admin-scheduled logon task,
 notification mirror, SMTC now-playing, WASAPI-loopback audio visualizer,
 adaptive fps, animated GIF backgrounds, drag snapping, undo/redo.
 
+[1.9.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.9.0
 [1.8.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.8.0
