@@ -16,7 +16,7 @@ import {
   type Layout, type Widget, type Sensors,
 } from './types'
 import { LS_KEY, loadLayout } from './layoutStore'
-import { dataUrlToBytes, fileToDataUrl, fileToWidgetImage } from './imageUtils'
+import { fileToDataUrl, fileToWidgetImage } from './imageUtils'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { SensorReadout } from './components/SensorReadout'
 import { WidgetProps } from './components/WidgetProps'
@@ -173,7 +173,9 @@ export default function App() {
     let n = 0
     const t0 = performance.now()
     let lastReport = t0
+    let encoding = false // skip a tick if the previous JPEG encode is still in flight
     const t = setInterval(() => {
+      if (encoding) return
       const stage = stageRef.current
       if (!stage) return
       // Capture only the content layer — layer 1 holds editor chrome (resize
@@ -183,45 +185,43 @@ export default function App() {
       const saturation = l.lcdSaturation ?? 1
       const brightness = l.lcdBrightness ?? 1
       const needsFilter = contrast !== 1 || saturation !== 1 || brightness !== 1
-      let url: string
-      if (rotate180 || needsFilter) {
-        // Konva's backing canvas may be devicePixelRatio-scaled; drawImage with
-        // explicit destination size normalizes it back to panel resolution.
-        // We also route through this canvas when the LCD-adjust filter is set
-        // (Konva's layer.toDataURL can't apply ctx.filter for us).
-        const src = stage.getLayers()[0].getCanvas()._canvas
-        let rc = rotCanvasRef.current
-        if (!rc) {
-          rc = document.createElement('canvas')
-          rc.width = PANEL_W
-          rc.height = PANEL_H
-          rotCanvasRef.current = rc
-        }
-        const ctx = rc.getContext('2d')!
-        ctx.save()
-        if (needsFilter) {
-          ctx.filter = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`
-        }
-        if (rotate180) {
-          ctx.translate(PANEL_W, PANEL_H)
-          ctx.rotate(Math.PI)
-        }
-        ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
-        ctx.restore()
-        url = rc.toDataURL('image/jpeg', 0.72)
-      } else {
-        url = stage.getLayers()[0].toDataURL({
-          mimeType: 'image/jpeg', quality: 0.72, pixelRatio: 1,
-          x: 0, y: 0, width: PANEL_W, height: PANEL_H,
-        })
+      // Always route through an offscreen canvas: it normalizes any Konva
+      // devicePixelRatio scaling to true panel resolution AND lets us apply
+      // ctx.filter for the LCD-adjust compensator. toBlob → arrayBuffer skips
+      // the base64 round-trip that toDataURL forces (encode-to-base64 in
+      // Chromium then decode-back-to-bytes in JS).
+      const src = stage.getLayers()[0].getCanvas()._canvas
+      let rc = rotCanvasRef.current
+      if (!rc) {
+        rc = document.createElement('canvas')
+        rc.width = PANEL_W
+        rc.height = PANEL_H
+        rotCanvasRef.current = rc
       }
-      sendFrame(dataUrlToBytes(url))
-      n++
-      const p = performance.now()
-      if (p - lastReport >= 1000) {
-        setMeasuredFps(Math.round((n / ((p - t0) / 1000)) * 10) / 10)
-        lastReport = p
+      const ctx = rc.getContext('2d')!
+      ctx.save()
+      if (needsFilter) {
+        ctx.filter = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`
       }
+      if (rotate180) {
+        ctx.translate(PANEL_W, PANEL_H)
+        ctx.rotate(Math.PI)
+      }
+      ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
+      ctx.restore()
+      encoding = true
+      rc.toBlob(async (blob) => {
+        encoding = false
+        if (!blob) return
+        const buf = await blob.arrayBuffer()
+        sendFrame(new Uint8Array(buf))
+        n++
+        const p = performance.now()
+        if (p - lastReport >= 1000) {
+          setMeasuredFps(Math.round((n / ((p - t0) / 1000)) * 10) / 10)
+          lastReport = p
+        }
+      }, 'image/jpeg', 0.72)
     }, Math.max(15, Math.round(1000 / streamFps))) // 15ms floor ≈ the 60fps cap
     return () => clearInterval(t)
   }, [streaming, sendFrame, streamFps, rotate180])

@@ -1,12 +1,5 @@
-// File/data-URL helpers for widget images and frame encoding.
+// File/data-URL helpers for widget images.
 import { PANEL_W, PANEL_H } from './types'
-
-export function dataUrlToBytes(url: string): Uint8Array<ArrayBuffer> {
-  const bin = atob(url.split(',')[1])
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return bytes
-}
 
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res) => {
