@@ -62,8 +62,12 @@ from trofeo.notifications import NotificationWatcher
 from trofeo.protocol import LyProtocol
 from trofeo.sensors import Sensors
 
-HOST = "localhost"
+# Explicit loopback bind — never reachable from other machines on the LAN even
+# if a firewall rule is created for our port. TROFEO_HOST=0.0.0.0 opts in to
+# LAN exposure (companion apps, remote layout tweaks); default is safe.
+HOST = os.environ.get("TROFEO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("TROFEO_PORT", "8787"))  # override for side-by-side testing
+MAX_TEXT_MSG = 4096  # our JSON commands are tiny; reject anything larger
 SENSOR_HZ = 1.0
 NOTIFY_POLL_S = 2.0
 MEDIA_POLL_S = 2.0
@@ -100,11 +104,19 @@ class DeviceManager:
                 self._connect()
             try:
                 self._proto.send_frame(jpeg)
-            except usb.core.USBError:
-                # drop the handle and reconnect once
-                if self._dev:
-                    self._dev.close()
+            except usb.core.USBError as e:
+                # Second attempt: USB port reset before reconnect. This recovers a
+                # panel stuck mid-transfer from a previous crashed sender (see
+                # TrofeoDevice.reset()) — a plain close+reopen leaves the device
+                # in the same wedged state.
+                print(f"[device] send failed ({e}); attempting reset+reopen", flush=True)
+                old = self._dev
                 self._dev = self._proto = None
+                if old is not None:
+                    try:
+                        old.reset()
+                    except Exception as reset_err:
+                        print(f"[device] reset failed: {reset_err}", flush=True)
                 self._connect()
                 self._proto.send_frame(jpeg)
 
@@ -213,20 +225,33 @@ async def notification_loop():
 
 
 async def sensor_loop(ws):
+    """Poll sensors and push camelCase payloads at SENSOR_HZ. A per-tick failure
+    (LHM race, transient WMI hiccup) logs and keeps the loop alive — losing a
+    single sample beats freezing all sensor updates for this connection."""
     loop = asyncio.get_running_loop()
+    err_streak = 0
     while True:
-        m = await loop.run_in_executor(None, sensors.read)
-        data = {k: v for k, v in dataclasses.asdict(m).items()}
-        # camelCase for JS
-        payload = {
-            "cpuTemp": _finite(data["cpu_temp"]), "cpuLoad": _finite(data["cpu_load"]),
-            "cpuPower": _finite(data["cpu_power"]), "cpuClock": _finite(data["cpu_clock"]),
-            "gpuTemp": _finite(data["gpu_temp"]), "gpuLoad": _finite(data["gpu_load"]),
-            "gpuPower": _finite(data["gpu_power"]), "ramLoad": _finite(data["ram_load"]),
-            "netUp": _finite(data["net_up"]), "netDown": _finite(data["net_down"]),
-            "diskLoad": _finite(data["disk_load"]),
-        }
-        await ws.send(json.dumps({"type": "sensors", "data": payload}))
+        try:
+            m = await loop.run_in_executor(None, sensors.read)
+            data = dataclasses.asdict(m)
+            # camelCase for JS
+            payload = {
+                "cpuTemp": _finite(data["cpu_temp"]), "cpuLoad": _finite(data["cpu_load"]),
+                "cpuPower": _finite(data["cpu_power"]), "cpuClock": _finite(data["cpu_clock"]),
+                "gpuTemp": _finite(data["gpu_temp"]), "gpuLoad": _finite(data["gpu_load"]),
+                "gpuPower": _finite(data["gpu_power"]), "ramLoad": _finite(data["ram_load"]),
+                "netUp": _finite(data["net_up"]), "netDown": _finite(data["net_down"]),
+                "diskLoad": _finite(data["disk_load"]),
+            }
+            await ws.send(json.dumps({"type": "sensors", "data": payload}))
+            err_streak = 0
+        except websockets.ConnectionClosed:
+            return  # handler's finally clause will clean us up
+        except Exception as e:
+            err_streak += 1
+            # log the first few and then only every 30s to avoid spam on a stuck sensor
+            if err_streak <= 3 or err_streak % int(30 * SENSOR_HZ) == 0:
+                print(f"[sensors] read/send failed (streak {err_streak}): {e}", flush=True)
         await asyncio.sleep(1.0 / SENSOR_HZ)
 
 
@@ -273,9 +298,13 @@ async def handler(ws):
                     await report("disconnected", str(e))
             else:
                 # text = JSON command from the editor
+                if len(message) > MAX_TEXT_MSG:
+                    continue  # malformed / hostile — our commands never approach 4KB
                 try:
                     cmd = json.loads(message)
                 except Exception:
+                    continue
+                if not isinstance(cmd, dict):
                     continue
                 if cmd.get("cmd") == "spectrum":
                     if cmd.get("on"):

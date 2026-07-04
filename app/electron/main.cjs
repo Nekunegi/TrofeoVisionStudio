@@ -70,6 +70,9 @@ function ensureAutostartTask() {
     : `[electron] autostart task registration failed: ${r.stderr}`)
 }
 
+let backendStartTime = 0
+let backendRestartCount = 0
+
 function startBackend() {
   if (process.env.SKIP_BACKEND) {
     console.log('[electron] SKIP_BACKEND set; not spawning backend')
@@ -89,11 +92,24 @@ function startBackend() {
   } catch { /* ignore */ }
   const log = fs.createWriteStream(logPath, { flags: 'a' })
   console.log(`[electron] backend: ${cmd} ${args.join(' ')} (cwd ${BACKEND_DIR}, log ${logPath})`)
+  backendStartTime = Date.now()
   py = spawn(cmd, args, { cwd: BACKEND_DIR, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
   py.stdout.on('data', (d) => { log.write(d); if (isDev) process.stdout.write(d) })
   py.stderr.on('data', (d) => { log.write(d); if (isDev) process.stderr.write(d) })
   py.on('error', (e) => console.error('[electron] backend spawn error:', e.message))
-  py.on('exit', (code) => console.log('[electron] backend exited:', code))
+  py.on('exit', (code) => {
+    const uptimeMs = Date.now() - backendStartTime
+    py = null
+    console.log(`[electron] backend exited: code=${code} after ${(uptimeMs / 1000) | 0}s`)
+    if (app.isQuiting || process.env.SKIP_BACKEND) return
+    // Healthy run before crash → reset the backoff so the next crash restarts fast.
+    if (uptimeMs > 60_000) backendRestartCount = 0
+    backendRestartCount++
+    // 1s → 2s → 4s → 8s → 16s → 30s (capped). Prevents log spam on hard failures.
+    const delay = Math.min(30_000, 1000 * 2 ** (backendRestartCount - 1))
+    console.log(`[electron] restarting backend in ${delay}ms (attempt ${backendRestartCount})`)
+    setTimeout(() => { if (!app.isQuiting) startBackend() }, delay)
+  })
 }
 
 function createWindow() {
