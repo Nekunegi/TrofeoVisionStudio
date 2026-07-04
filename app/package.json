@@ -61,8 +61,9 @@
         "to": "backend/libs"
       },
       {
-        "from": "../redist/PawnIO_setup.exe",
-        "to": "PawnIO_setup.exe"
+        "from": "../redist",
+        "to": ".",
+        "filter": ["PawnIO_setup.exe"]
       }
     ],
     "publish": [

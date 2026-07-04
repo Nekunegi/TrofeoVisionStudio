@@ -7,8 +7,11 @@
 ;   which avoids NSIS<->schtasks quoting pitfalls entirely.
 
 !macro customInstall
-  DetailPrint "Installing PawnIO driver..."
-  ExecWait '"$INSTDIR\resources\PawnIO_setup.exe" -install -silent'
+  ; Only run PawnIO's silent installer if the redist actually shipped —
+  ; the CI release workflow may build an installer without it.
+  IfFileExists "$INSTDIR\resources\PawnIO_setup.exe" 0 +3
+    DetailPrint "Installing PawnIO driver..."
+    ExecWait '"$INSTDIR\resources\PawnIO_setup.exe" -install -silent'
   DetailPrint "Starting Trofeo Vision Studio (elevated)..."
   Exec '"$INSTDIR\Trofeo Vision Studio.exe"'
 !macroend

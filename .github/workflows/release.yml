@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to build (e.g. v1.9.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # required by softprops/action-gh-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Python dependencies (backend + PyInstaller)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # Vendor the LibreHardwareMonitor DLLs the sensor layer relies on.
+      # LHM ships every runtime dep in one zip, so we don't have to cherry-pick.
+      - name: Download LibreHardwareMonitor v0.9.6
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/download/v0.9.6/LibreHardwareMonitor.zip'
+          Invoke-WebRequest -Uri $url -OutFile lhm.zip -UseBasicParsing
+          Expand-Archive lhm.zip -DestinationPath lhm-extract
+          New-Item -ItemType Directory -Force libs | Out-Null
+          Get-ChildItem lhm-extract -Recurse -Filter *.dll | Copy-Item -Destination libs
+          Get-ChildItem libs | Select-Object Name, Length | Format-Table -AutoSize
+
+      # PawnIO_setup.exe is licensed by pawnio.eu and not committed. If the
+      # workflow has a PAWNIO_URL secret, the installer bundles PawnIO for
+      # HVCI-enabled machines; otherwise the installer skips PawnIO and users
+      # install it manually (installer.nsh handles the missing file).
+      - name: Fetch PawnIO installer (optional)
+        if: ${{ env.PAWNIO_URL != '' }}
+        env:
+          PAWNIO_URL: ${{ secrets.PAWNIO_URL }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force redist | Out-Null
+          Invoke-WebRequest -Uri $env:PAWNIO_URL -OutFile redist/PawnIO_setup.exe -UseBasicParsing
+          Write-Host "PawnIO_setup.exe bundled ($((Get-Item redist/PawnIO_setup.exe).Length) B)"
+
+      - name: PyInstaller (build server.exe)
+        run: |
+          python -m PyInstaller --noconfirm --onedir --name server `
+            --distpath build --workpath build\work --specpath build `
+            --collect-all libusb_package --collect-all websockets `
+            --collect-all pythonnet --collect-all winsdk --collect-all pyaudiowpatch `
+            --hidden-import clr server.py
+
+      - name: Install app deps
+        working-directory: app
+        run: npm ci
+
+      - name: Frontend lint / typecheck / test
+        working-directory: app
+        run: |
+          npm run lint
+          npm run build
+          npm test
+
+      - name: electron-builder (NSIS installer)
+        working-directory: app
+        env:
+          # Prevent electron-builder from trying to publish itself — the
+          # softprops action below owns the upload step.
+          GH_TOKEN: ""
+        run: npx electron-builder --publish never
+
+      # electron-updater's latest.yml references the URL with dashes instead
+      # of spaces. Rename the actual artifact to match so auto-update works.
+      - name: Normalize installer filename for auto-updater
+        shell: pwsh
+        working-directory: app/release
+        run: |
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v','' } else { '${{ inputs.tag }}' -replace '^v','' }
+          $spaces = "Trofeo Vision Studio Setup $tag"
+          $dashes = "Trofeo-Vision-Studio-Setup-$tag"
+          if (Test-Path "$spaces.exe") {
+            Copy-Item "$spaces.exe" "$dashes.exe"
+            if (Test-Path "$spaces.exe.blockmap") {
+              Copy-Item "$spaces.exe.blockmap" "$dashes.exe.blockmap"
+            }
+          }
+          Get-ChildItem -File | Select-Object Name | Format-Table -AutoSize
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v','' } else { '${{ inputs.tag }}' -replace '^v','' }
+          $changelog = Get-Content CHANGELOG.md -Raw
+          # Grab the block for [X.Y.Z] up to the next H2.
+          $pattern = "(?ms)## \[$([regex]::Escape($tag))\].*?(?=^## |\z)"
+          $match = [regex]::Match($changelog, $pattern)
+          if ($match.Success) {
+            $body = $match.Value.Trim()
+          } else {
+            $body = "Release $tag."
+          }
+          $out = "release-notes.md"
+          Set-Content -Path $out -Value $body -Encoding utf8
+          "notes_file=$out" | Add-Content $env:GITHUB_OUTPUT
+          Write-Host "----- release notes -----"
+          Get-Content $out
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            app/release/Trofeo-Vision-Studio-Setup-*.exe
+            app/release/Trofeo-Vision-Studio-Setup-*.exe.blockmap
+            app/release/latest.yml
