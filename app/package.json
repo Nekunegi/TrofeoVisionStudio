@@ -2,7 +2,7 @@
   "name": "trofeo-vision-studio",
   "productName": "Trofeo Vision Studio",
   "private": true,
-  "version": "1.7.1",
+  "version": "1.8.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -19,6 +19,7 @@
     "@fontsource/inter": "^5.2.8",
     "@fontsource/orbitron": "^5.2.8",
     "@fontsource/rajdhani": "^5.2.7",
+    "electron-updater": "^6.8.9",
     "konva": "^10.3.0",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
@@ -59,6 +60,13 @@
       {
         "from": "../redist/PawnIO_setup.exe",
         "to": "PawnIO_setup.exe"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Nekunegi",
+        "repo": "TrofeoVisionStudio"
       }
     ],
     "win": {

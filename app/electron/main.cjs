@@ -2,11 +2,13 @@
 // keeps streaming to the LCD while minimized to the tray (headless resident mode).
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, protocol, net, session, desktopCapturer,
+  Notification,
 } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const { pathToFileURL } = require('url')
+const { autoUpdater } = require('electron-updater')
 
 const isDev = !app.isPackaged
 
@@ -228,19 +230,83 @@ function createWindow() {
   })
 }
 
+// Updater state — surfaced in the tray menu so a hidden resident can still
+// see when a new version is available.
+let updateReadyVersion = null
+let updateChecking = false
+
+function rebuildTrayMenu() {
+  if (!tray) return
+  const items = [
+    { label: 'Show editor', click: () => win?.show() },
+    { type: 'separator' },
+  ]
+  if (updateReadyVersion) {
+    items.push({
+      label: `Install update ${updateReadyVersion} and restart`,
+      click: () => { app.isQuiting = true; autoUpdater.quitAndInstall() },
+    })
+  } else {
+    items.push({
+      label: updateChecking ? 'Checking for updates…' : 'Check for updates',
+      enabled: !updateChecking,
+      click: () => { updateChecking = true; rebuildTrayMenu(); autoUpdater.checkForUpdates().catch(() => {}) },
+    })
+  }
+  items.push({ type: 'separator' })
+  items.push({ label: 'Quit', click: () => { app.isQuiting = true; app.quit() } })
+  tray.setContextMenu(Menu.buildFromTemplate(items))
+}
+
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png'))
   tray = new Tray(icon)
   tray.setToolTip('Trofeo Vision Studio — streaming to LCD')
   // Autostart is handled by the installer-registered scheduled task
   // (TrofeoVisionStudio, elevated at logon) — no login-item toggle here.
-  const menu = Menu.buildFromTemplate([
-    { label: 'Show editor', click: () => win?.show() },
-    { type: 'separator' },
-    { label: 'Quit', click: () => { app.isQuiting = true; app.quit() } },
-  ])
-  tray.setContextMenu(menu)
+  rebuildTrayMenu()
   tray.on('double-click', () => win?.show())
+}
+
+// Auto-update: check GitHub Releases on startup and every 6h; downloaded
+// updates apply at quit-and-install (never mid-session; would kill streaming).
+// NOTE: the source repo is currently private — electron-updater needs a GH
+// token to reach private release assets, so checks will fail silently until
+// the repo (or its releases) go public. The code path stays wired.
+function setupAutoUpdate() {
+  if (isDev) return
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = false // let the user press "Install and restart"
+  autoUpdater.on('checking-for-update', () => {
+    updateChecking = true
+    rebuildTrayMenu()
+  })
+  autoUpdater.on('update-not-available', () => {
+    updateChecking = false
+    rebuildTrayMenu()
+  })
+  autoUpdater.on('update-available', (info) => {
+    console.log(`[updater] update available: ${info.version}`)
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log(`[updater] update ready: ${info.version}`)
+    updateReadyVersion = info.version
+    updateChecking = false
+    rebuildTrayMenu()
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'Trofeo Vision Studio',
+        body: `新しいバージョン ${info.version} をインストールできます (トレイメニューから)`,
+      }).show()
+    }
+  })
+  autoUpdater.on('error', (e) => {
+    updateChecking = false
+    rebuildTrayMenu()
+    console.error('[updater] error:', e.message)
+  })
+  autoUpdater.checkForUpdates().catch(() => {})
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000)
 }
 
 // Two instances would fight over the USB device and port 8787 — a second
@@ -297,6 +363,7 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   watchShowSignal()
+  setupAutoUpdate()
   // DEBUG_QUIT_AFTER=<ms>: exercise the real quit path (incl. LCD blanking)
   // without clicking the tray menu — eyes-free testing.
   if (process.env.DEBUG_QUIT_AFTER) {

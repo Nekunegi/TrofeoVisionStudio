@@ -4,7 +4,7 @@ All notable changes to Trofeo Vision Studio are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] — 2026-07-05
 
 ### Added
 - **LCD Adjust panel**: Contrast / Saturation / Brightness sliders applied via
@@ -17,6 +17,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Warn / Crit threshold zones** on Bar and Graph widgets. Bar fills switch to
   the configured warn/crit colours once the value crosses; Graph shows tinted
   bands across the plot area.
+- **Layers sidebar section**: reorder z-order, hide/show, lock/unlock, and
+  delete any widget without needing to click through the stage.
+- **Categorized + searchable widget palette** with English & Japanese
+  aliases. Enter with a single match inserts it (keyboard-first).
+- **Auto-update via electron-updater**: check GitHub Releases on startup and
+  every 6 hours. Downloaded updates apply at "Install and restart" from the
+  tray, never mid-session.
 
 ### Changed
 - Frame capture path now skips the base64 round-trip: `canvas.toBlob` →
@@ -57,5 +64,5 @@ Highlights: PyInstaller-bundled backend, admin-scheduled logon task,
 notification mirror, SMTC now-playing, WASAPI-loopback audio visualizer,
 adaptive fps, animated GIF backgrounds, drag snapping, undo/redo.
 
-[Unreleased]: https://github.com/Nekunegi/TrofeoVisionStudio/compare/v1.7.1...HEAD
+[1.8.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.8.0
 [1.7.1]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.7.1
