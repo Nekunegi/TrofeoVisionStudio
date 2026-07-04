@@ -65,4 +65,3 @@ notification mirror, SMTC now-playing, WASAPI-loopback audio visualizer,
 adaptive fps, animated GIF backgrounds, drag snapping, undo/redo.
 
 [1.8.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.8.0
-[1.7.1]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.7.1
