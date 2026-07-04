@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs for the same branch — no reason to spend minutes
+# on a commit the author has already pushed a fix over.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Backend: import + compile + protocol tests.
+  # We deliberately avoid PyInstaller/electron-builder here — the release
+  # workflow handles distribution artifacts. This job is a fast (< 3 min)
+  # correctness gate.
+  backend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+
+      - name: Compile check (all Python entrypoints)
+        # tools/*.py inject sys.path to reach `trofeo`, so compile them from
+        # the repo root the same way a user would.
+        run: |
+          python -m py_compile server.py
+          python -m py_compile trofeo\__init__.py trofeo\audio.py trofeo\dashboard.py trofeo\device.py trofeo\media.py trofeo\notifications.py trofeo\protocol.py trofeo\render.py trofeo\sensors.py
+          python -m py_compile tools\demo.py tools\diag.py tools\hs_test.py tools\monitor.py tools\probe.py
+
+      - name: Protocol tests
+        run: python -m pytest
+
+  # Frontend: lint, typecheck, build, and vitest.
+  frontend:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check + build
+        run: npm run build
+
+      - name: Vitest
+        run: npm test
