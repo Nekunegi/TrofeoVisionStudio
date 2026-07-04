@@ -384,7 +384,10 @@ function installCsp() {
     // ws://localhost:8787 (browser resolves that to loopback). Allow both
     // host forms so a first-run install without a manual localStorage
     // override still connects.
-    "connect-src 'self' app: ws://127.0.0.1:* ws://localhost:* https://api.open-meteo.com https://geocoding-api.open-meteo.com",
+    // data: is required for fetch() of the IndexedDB-persisted background
+    // media (a data: URL) inside useAnimatedImage — WebCodecs decodes it
+    // frame-by-frame. img-src doesn't cover that; fetch is a connect-src.
+    "connect-src 'self' app: data: ws://127.0.0.1:* ws://localhost:* https://api.open-meteo.com https://geocoding-api.open-meteo.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
   ].join('; ')
