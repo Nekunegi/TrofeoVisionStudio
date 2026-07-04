@@ -4,7 +4,7 @@ import {
   Activity, Clock as ClockIcon, Type, Gauge as GaugeIcon, ChartLine, ChartBar,
   ImagePlus, Upload, RotateCcw, MonitorCog, Palette,
   MousePointerClick, Bookmark, Zap, Copy, BringToFront, SendToBack, Bell,
-  Music, CloudSun, AudioLines,
+  Music, CloudSun, AudioLines, Layers,
 } from 'lucide-react'
 import DashboardStage, { type LcdToast } from './DashboardStage'
 import { useBackend } from './useBackend'
@@ -21,6 +21,7 @@ import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { SensorReadout } from './components/SensorReadout'
 import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
+import { LayerPanel } from './components/LayerPanel'
 import './App.css'
 
 let idc = 0
@@ -301,6 +302,26 @@ export default function App() {
     })
   }, [commit])
 
+  // Move a specific widget one step in z-order (LayerPanel row arrows).
+  // 'up' = closer to viewer = higher array index.
+  const reorderOne = useCallback((id: string, dir: 'up' | 'down') => {
+    commit((l) => {
+      const idx = l.widgets.findIndex((x) => x.id === id)
+      if (idx < 0) return l
+      const target = dir === 'up' ? idx + 1 : idx - 1
+      if (target < 0 || target >= l.widgets.length) return l
+      const arr = l.widgets.slice()
+      const [w] = arr.splice(idx, 1)
+      arr.splice(target, 0, w)
+      return { ...l, widgets: arr }
+    })
+  }, [commit])
+
+  const deleteById = useCallback((id: string) => {
+    commit((l) => ({ ...l, widgets: l.widgets.filter((w) => w.id !== id) }))
+    if (selectedIdRef.current === id) setSelectedId(null)
+  }, [commit])
+
   const nudge = useCallback((dx: number, dy: number) => {
     const id = selectedIdRef.current
     if (!id) return
@@ -567,6 +588,18 @@ export default function App() {
                 )}
               </>
             )}
+          </section>
+
+          <section>
+            <h3><Layers size={13} />Layers <span className="tag">{layout.widgets.length}</span></h3>
+            <LayerPanel
+              widgets={layout.widgets}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onUpdate={update}
+              onDelete={deleteById}
+              onReorder={reorderOne}
+            />
           </section>
 
           <section>

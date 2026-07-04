@@ -409,10 +409,13 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
   useEffect(() => {
     const tr = trRef.current
     if (!tr) return
-    const node = selectedId ? groupRefs.current.get(selectedId) : null
+    // Don't attach handles for locked or hidden widgets — LayerPanel still lets
+    // the user select them (to unlock / unhide), but stage-side stays inert.
+    const inert = !selected || selected.locked || selected.hidden
+    const node = selectedId && !inert ? groupRefs.current.get(selectedId) : null
     tr.nodes(node ? [node] : [])
     tr.getLayer()?.batchDraw()
-  }, [selectedId, layout])
+  }, [selectedId, selected, layout])
 
   return (
     <Stage
@@ -444,33 +447,37 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
           <Rect width={PANEL_W} height={PANEL_H} fill="#000"
             opacity={Math.min(0.9, layout.bgDim ?? 0)} />
         )}
-        {layout.widgets.map((w) => (
-          <Group
-            key={w.id}
-            ref={(node) => {
-              if (node) groupRefs.current.set(w.id, node)
-              else groupRefs.current.delete(w.id)
-            }}
-            x={w.x}
-            y={w.y}
-            opacity={w.opacity ?? 1}
-            draggable={editable}
-            onMouseDown={() => editable && onSelect?.(w.id)}
-            onDragMove={(e) => editable && snapDragMove(w.id, e)}
-            onDragEnd={(e) => {
-              setGuides({ v: [], h: [] })
-              onMove?.(w.id, Math.round(e.target.x()), Math.round(e.target.y()))
-            }}
-            onTransformEnd={(e) => {
-              const node = e.target
-              onResize?.(w.id, node.scaleX(), node.scaleY(),
-                Math.round(node.x()), Math.round(node.y()))
-              node.scale({ x: 1, y: 1 })
-            }}
-          >
-            {renderInner(w, sensors, now, history, bgEnv, media, spectrum)}
-          </Group>
-        ))}
+        {layout.widgets.map((w) => {
+          if (w.hidden) return null
+          const interactive = editable && !w.locked
+          return (
+            <Group
+              key={w.id}
+              ref={(node) => {
+                if (node) groupRefs.current.set(w.id, node)
+                else groupRefs.current.delete(w.id)
+              }}
+              x={w.x}
+              y={w.y}
+              opacity={w.opacity ?? 1}
+              draggable={interactive}
+              onMouseDown={() => interactive && onSelect?.(w.id)}
+              onDragMove={(e) => interactive && snapDragMove(w.id, e)}
+              onDragEnd={(e) => {
+                setGuides({ v: [], h: [] })
+                onMove?.(w.id, Math.round(e.target.x()), Math.round(e.target.y()))
+              }}
+              onTransformEnd={(e) => {
+                const node = e.target
+                onResize?.(w.id, node.scaleX(), node.scaleY(),
+                  Math.round(node.x()), Math.round(node.y()))
+                node.scale({ x: 1, y: 1 })
+              }}
+            >
+              {renderInner(w, sensors, now, history, bgEnv, media, spectrum)}
+            </Group>
+          )
+        })}
         {toasts.map((t, i) => <ToastCard key={t.id} t={t} index={i} bg={bgEnv} />)}
       </Layer>
       {editable && (

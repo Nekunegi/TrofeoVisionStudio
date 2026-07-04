@@ -271,6 +271,82 @@ aside section:nth-child(6) { animation-delay: 0.2s; }
 
 /* selection props swap in softly when a widget is picked */
 .props { animation: fadeUp 0.22s ease both; }
+
+/* layer panel — top-of-stack first, one row per widget */
+.layers {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.layers li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 0;
+  background: var(--bg-input);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.layers li:hover { border-color: rgba(77, 225, 255, 0.3); }
+.layers li.active {
+  border-color: rgba(77, 225, 255, 0.55);
+  background: rgba(77, 225, 255, 0.06);
+}
+.layers .row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.layers .row-main:hover { background: transparent; box-shadow: none; transform: none; }
+.layers .type {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  opacity: 0.7;
+  flex-shrink: 0;
+  min-width: 26px;
+}
+.layers .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sub);
+}
+.layers li.active .name { color: var(--text); }
+.layers li button {
+  padding: 4px 5px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  min-width: 22px;
+}
+.layers li button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  transform: none;
+  box-shadow: none;
+}
+.layers li button.toggled { color: var(--accent); }
+.layers li button.danger { color: var(--err); background: transparent; }
+.layers li button.danger:hover { background: rgba(255, 122, 138, 0.12); }
 aside h3 {
   margin: 0 0 11px;
   font-size: 10.5px;

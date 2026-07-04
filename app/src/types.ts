@@ -33,6 +33,10 @@ interface Base {
   x: number
   y: number
   opacity?: number // 0..1, default 1
+  // Editor-only flags (LayerPanel toggles). Hidden widgets are not painted;
+  // locked widgets paint but resist stage-side drag / click-select.
+  hidden?: boolean
+  locked?: boolean
 }
 
 export interface TextWidget extends Base {
