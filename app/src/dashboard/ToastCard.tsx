@@ -40,7 +40,7 @@ export function ToastCard({ t, index, bg }: { t: LcdToast; index: number; bg: Bg
           fill="rgba(5,7,12,0.88)" />
       )}
       <PanelStroke w={TOAST_W} h={TOAST_H} r={26} />
-      <Rect x={0} y={14} width={4} height={TOAST_H - 28} cornerRadius={2}
+      <Rect x={8} y={14} width={4} height={TOAST_H - 28} cornerRadius={2}
         fill="#4de1ff" shadowColor="#4de1ff" shadowBlur={8} shadowOpacity={0.8} />
       <Text x={22} y={14} width={TOAST_W - 40} text={t.app.toUpperCase()}
         fontSize={17} fill="#4de1ff" fontFamily={TOAST_FONT} fontStyle="600"
