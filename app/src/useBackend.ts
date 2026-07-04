@@ -147,6 +147,22 @@ export function useBackend(): Backend {
     }
   }, [])
 
+  // Eyes-free debugging: synthetic sensor overrides for screenshots / demos
+  // when the backend can't reach real values (e.g. a non-elevated test
+  // instance can't read CPU temperature via PawnIO). Same shape as __injectMedia:
+  // window.__injectSensors({cpuTemp: 52, gpuLoad: 78, ...}) or a one-shot
+  // 'debug-sensors' localStorage key that survives a location.reload().
+  useEffect(() => {
+    const inject = (d: Partial<Sensors>) =>
+      setSensors((prev) => ({ ...prev, ...d } as Sensors))
+    ;(window as unknown as { __injectSensors?: typeof inject }).__injectSensors = inject
+    const dbg = localStorage.getItem('debug-sensors')
+    if (dbg) {
+      localStorage.removeItem('debug-sensors')
+      try { inject(JSON.parse(dbg)) } catch { /* malformed — ignore */ }
+    }
+  }, [])
+
   return {
     link, device, deviceDetail, sensors, notification, notifyStatus, media,
     spectrumFrame, spectrumStatus, sendFrame, sendCmd,

@@ -5,6 +5,12 @@ TRCC ソフトを使わずに制御するための **自作ドライバ + ダッ
 (Windows / Electron + React + Python)。
 
 <p align="center">
+  <a href="https://github.com/Nekunegi/TrofeoVisionStudio/releases/latest">
+    <strong>⬇ Download the latest installer</strong>
+  </a>
+</p>
+
+<p align="center">
   <img src="docs/img/editor.png" alt="エディタ画面" width="900">
 </p>
 
