@@ -123,7 +123,27 @@ function createWindow() {
     // Logon autostart (--hidden) starts tray-only; streaming still runs because
     // backgroundThrottling is off and the page renders while hidden.
     show: !process.argv.includes('--hidden'),
-    webPreferences: { backgroundThrottling: false }, // keep streaming when hidden
+    webPreferences: {
+      backgroundThrottling: false, // keep streaming when hidden
+      // Locked-down defaults — the renderer runs untrusted-ish (localStorage
+      // may hold user-supplied SVG / data URLs). No Node APIs, sandboxed
+      // renderer process, contextIsolation for any future IPC helpers.
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  })
+
+  // Block the renderer from opening arbitrary external windows / navigating
+  // away from the app bundle. Everything legitimate is loaded internally.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith(DEV_URL) && !url.startsWith('app://')) {
+      e.preventDefault()
+      console.warn('[electron] blocked navigation to', url)
+    }
   })
 
   // Surface renderer console + load failures on stdout AND a log file — the
@@ -155,12 +175,17 @@ function createWindow() {
   if (isDev) win.loadURL(DEV_URL + q)
   else win.loadURL('app://bundle/index.html' + q)
 
-  // Eyes-free debugging on a remote box: DEBUG_SHOT=<path.png> clicks the first
-  // widget (so selection chrome shows) and saves an editor screenshot there.
+  // Eyes-free debugging hooks. Gated to dev mode by default so a packaged
+  // resident won't respond to DEBUG_EVAL etc. — set TROFEO_DEV=1 to opt back
+  // in when running smoke tests against a packaged win-unpacked build.
+  const debugHooksEnabled = isDev || process.env.TROFEO_DEV === '1'
+
+  // DEBUG_SHOT=<path.png> clicks the first widget (so selection chrome
+  // shows) and saves an editor screenshot there.
   // DEBUG_CLICK_TEXT=<label> clicks that sidebar button instead (e.g. "Graph").
   // DEBUG_EVAL=<js> runs arbitrary JS in the renderer ~8s after launch and
   // logs the result — eyes-free poking (seed localStorage, inspect state, ...).
-  if (process.env.DEBUG_EVAL) {
+  if (debugHooksEnabled && process.env.DEBUG_EVAL) {
     setTimeout(async () => {
       try {
         const r = await win.webContents.executeJavaScript(process.env.DEBUG_EVAL)
@@ -170,7 +195,7 @@ function createWindow() {
   }
   // Second-stage eval at ~16s — survives a location.reload() issued by DEBUG_EVAL
   // (the seed-then-inspect pattern in one app run).
-  if (process.env.DEBUG_EVAL_LATE) {
+  if (debugHooksEnabled && process.env.DEBUG_EVAL_LATE) {
     setTimeout(async () => {
       try {
         const r = await win.webContents.executeJavaScript(process.env.DEBUG_EVAL_LATE)
@@ -180,7 +205,7 @@ function createWindow() {
   }
   // DEBUG_FRAME=<path.png> saves the full-resolution LCD content layer (the
   // first Konva canvas) — exactly what gets streamed to the panel.
-  if (process.env.DEBUG_FRAME) {
+  if (debugHooksEnabled && process.env.DEBUG_FRAME) {
     setTimeout(async () => {
       try {
         const url = await win.webContents.executeJavaScript(
@@ -191,7 +216,7 @@ function createWindow() {
       } catch (e) { console.error('[debug] frame dump failed:', e.message) }
     }, 12000)
   }
-  if (process.env.DEBUG_SHOT) {
+  if (debugHooksEnabled && process.env.DEBUG_SHOT) {
     setTimeout(async () => {
       try {
         await win.webContents.executeJavaScript(`(() => {
@@ -342,7 +367,39 @@ function watchShowSignal() {
   }
 }
 
+// Strict CSP for the renderer. Dev mode gets 'unsafe-inline' / 'unsafe-eval'
+// for Vite HMR; production locks scripts to 'self' + app://. Open-Meteo is
+// whitelisted for the weather widget; ws://127.0.0.1:* covers the backend
+// WebSocket (never LAN — the backend also binds loopback-only).
+function installCsp() {
+  const dev = "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: app: ws: wss: http://localhost:*"
+  const prod = [
+    "default-src 'self' app:",
+    "script-src 'self' app:",
+    "style-src 'self' app: 'unsafe-inline'", // Konva / react-konva inject inline styles
+    "img-src 'self' app: data: blob:",
+    "media-src 'self' app: blob:",
+    "font-src 'self' app: data:",
+    // Backend binds 127.0.0.1 explicitly, but useBackend defaults to
+    // ws://localhost:8787 (browser resolves that to loopback). Allow both
+    // host forms so a first-run install without a manual localStorage
+    // override still connects.
+    "connect-src 'self' app: ws://127.0.0.1:* ws://localhost:* https://api.open-meteo.com https://geocoding-api.open-meteo.com",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+  ].join('; ')
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [isDev ? dev : prod],
+      },
+    })
+  })
+}
+
 app.whenReady().then(() => {
+  installCsp()
   if (!isDev) {
     protocol.handle('app', (req) => {
       let p = decodeURIComponent(new URL(req.url).pathname)
@@ -366,7 +423,7 @@ app.whenReady().then(() => {
   setupAutoUpdate()
   // DEBUG_QUIT_AFTER=<ms>: exercise the real quit path (incl. LCD blanking)
   // without clicking the tray menu — eyes-free testing.
-  if (process.env.DEBUG_QUIT_AFTER) {
+  if ((isDev || process.env.TROFEO_DEV === '1') && process.env.DEBUG_QUIT_AFTER) {
     setTimeout(() => { app.isQuiting = true; app.quit() }, +process.env.DEBUG_QUIT_AFTER)
   }
 })

@@ -28,6 +28,7 @@ import dataclasses
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -68,6 +69,16 @@ from trofeo.sensors import Sensors
 HOST = os.environ.get("TROFEO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("TROFEO_PORT", "8787"))  # override for side-by-side testing
 MAX_TEXT_MSG = 4096  # our JSON commands are tiny; reject anything larger
+
+# Origin allowlist for browser-initiated WebSocket connections:
+#   app://bundle            — the packaged Electron renderer
+#   http://localhost:5173   — Vite dev server (any port)
+#   http://127.0.0.1:5173   — same, IP form
+# Native clients (Python/curl/tools/*.py) send no Origin header — accepted.
+# Anything else — including a rogue browser tab probing localhost — is rejected.
+LEGIT_ORIGIN = re.compile(
+    r"^(app://|http://(localhost|127\.0\.0\.1)(:\d+)?(/|$))", re.IGNORECASE
+)
 SENSOR_HZ = 1.0
 NOTIFY_POLL_S = 2.0
 MEDIA_POLL_S = 2.0
@@ -258,8 +269,30 @@ async def sensor_loop(ws):
 _frame_count = 0
 
 
+def _get_origin(ws) -> str | None:
+    """Best-effort Origin lookup across websockets library versions."""
+    req = getattr(ws, "request", None)
+    if req is not None and getattr(req, "headers", None) is not None:
+        try:
+            return req.headers.get("Origin")
+        except Exception:
+            pass
+    headers = getattr(ws, "request_headers", None)
+    if headers is not None:
+        try:
+            return headers.get("Origin")
+        except Exception:
+            pass
+    return None
+
+
 async def handler(ws):
     global _frame_count
+    origin = _get_origin(ws)
+    if origin is not None and not LEGIT_ORIGIN.match(origin):
+        print(f"[ws] rejecting cross-origin connect: {origin}", flush=True)
+        await ws.close(code=1008, reason="forbidden origin")
+        return
     print("client connected", flush=True)
     loop = asyncio.get_running_loop()
 
