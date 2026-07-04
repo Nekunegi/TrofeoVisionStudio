@@ -23,6 +23,7 @@ import { Presets } from './components/Presets'
 import { LayerPanel } from './components/LayerPanel'
 import { WidgetPalette } from './components/WidgetPalette'
 import { FirstRunWizard } from './components/FirstRunWizard'
+import { UpdateBell } from './components/UpdateBell'
 import './App.css'
 
 let idc = 0
@@ -390,6 +391,7 @@ export default function App() {
             <span className="track" />
             Stream
           </label>
+          <UpdateBell />
         </div>
       </header>
 

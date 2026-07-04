@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-07-05
+
+### Added
+- **In-app update bell**: a bell button lives in the header next to the
+  Stream toggle. It reflects the auto-updater state in real time —
+  spinner while checking / downloading (with % progress), a badge when a
+  version is ready to install, and a red error state if the check
+  failed. Clicking the bell opens a popover with the current version,
+  the new version, and an "インストールして再起動" call-to-action that
+  triggers `quitAndInstall` directly from the app UI. Previously the
+  only way to install a downloaded update was via the tray menu.
+
 ## [1.9.1] — 2026-07-05
 
 ### Fixed
@@ -120,6 +132,7 @@ Highlights: PyInstaller-bundled backend, admin-scheduled logon task,
 notification mirror, SMTC now-playing, WASAPI-loopback audio visualizer,
 adaptive fps, animated GIF backgrounds, drag snapping, undo/redo.
 
+[1.10.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.10.0
 [1.9.1]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.9.1
 [1.9.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.9.0
 [1.8.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.8.0

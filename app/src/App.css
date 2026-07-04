@@ -638,3 +638,129 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
 }
 ::-webkit-scrollbar-thumb:hover { background: #333b52; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* -------------------------------------------- update bell (header, right) */
+.bell-wrap { position: relative; }
+.bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.bell:hover { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
+.bell.has-update {
+  color: var(--warn);
+  border-color: rgba(255, 200, 97, 0.35);
+  background: rgba(255, 200, 97, 0.08);
+}
+.bell.ready {
+  color: #ffd15a;
+  border-color: rgba(255, 200, 97, 0.55);
+  background: rgba(255, 200, 97, 0.12);
+  animation: bellPulse 2.4s ease-in-out infinite;
+}
+.bell.error { color: var(--err); border-color: rgba(255, 122, 138, 0.4); }
+.bell .spin { animation: spin 1s linear infinite; }
+
+.bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff5566;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.bell.ready .bell-badge { background: #ffb03a; }
+
+.bell-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(20, 22, 32, 0.96);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+  animation: fadeUp 140ms ease-out;
+}
+.bell-current { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.bell-current b { color: var(--fg); font-weight: 600; }
+.bell-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg);
+  margin-bottom: 10px;
+}
+.bell-msg.ok { color: #ffd15a; }
+.bell-msg.err { color: var(--err); }
+.bell-cta {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 200, 97, 0.5);
+  background: linear-gradient(180deg, rgba(255, 200, 97, 0.2), rgba(255, 200, 97, 0.08));
+  color: #ffd884;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+.bell-cta:hover { filter: brightness(1.15); }
+.bell-check {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+  cursor: pointer;
+}
+.bell-check:hover { background: rgba(255, 255, 255, 0.08); }
+.bell-note { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.bell-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.bell-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ffb03a, #ffd15a);
+  transition: width 200ms ease-out;
+}
+.bell-err-detail {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 122, 138, 0.08);
+  color: var(--muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes bellPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 200, 97, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(255, 200, 97, 0); }
+}

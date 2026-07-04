@@ -2,7 +2,7 @@
 // keeps streaming to the LCD while minimized to the tray (headless resident mode).
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, protocol, net, session, desktopCapturer,
-  Notification,
+  Notification, ipcMain,
 } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
@@ -259,6 +259,21 @@ function createWindow() {
 // see when a new version is available.
 let updateReadyVersion = null
 let updateChecking = false
+// Full updater state broadcast to the renderer bell. `state` is one of:
+// idle | checking | available | downloading | ready | error.
+// current is filled once we know the running version (post whenReady).
+let updaterState = { state: 'idle', current: null, version: null, percent: 0, error: null }
+
+function pushUpdaterState() {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('updater:status', updaterState)
+  }
+}
+
+function setUpdaterState(patch) {
+  updaterState = { ...updaterState, ...patch }
+  pushUpdaterState()
+}
 
 function rebuildTrayMenu() {
   if (!tray) return
@@ -299,29 +314,38 @@ function createTray() {
 // token to reach private release assets, so checks will fail silently until
 // the repo (or its releases) go public. The code path stays wired.
 function setupAutoUpdate() {
-  if (isDev) return
+  updaterState.current = app.getVersion()
+  if (isDev) { pushUpdaterState(); return }
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = false // let the user press "Install and restart"
   autoUpdater.on('checking-for-update', () => {
     updateChecking = true
     rebuildTrayMenu()
+    // Preserve 'ready' if a downloaded update is already waiting.
+    if (updaterState.state !== 'ready') setUpdaterState({ state: 'checking', error: null })
   })
   autoUpdater.on('update-not-available', () => {
     updateChecking = false
     rebuildTrayMenu()
+    if (updaterState.state !== 'ready') setUpdaterState({ state: 'idle' })
   })
   autoUpdater.on('update-available', (info) => {
     console.log(`[updater] update available: ${info.version}`)
+    setUpdaterState({ state: 'downloading', version: info.version, percent: 0 })
+  })
+  autoUpdater.on('download-progress', (p) => {
+    setUpdaterState({ state: 'downloading', percent: Math.round(p.percent || 0) })
   })
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`[updater] update ready: ${info.version}`)
     updateReadyVersion = info.version
     updateChecking = false
     rebuildTrayMenu()
+    setUpdaterState({ state: 'ready', version: info.version, percent: 100 })
     if (Notification.isSupported()) {
       new Notification({
         title: 'Trofeo Vision Studio',
-        body: `新しいバージョン ${info.version} をインストールできます (トレイメニューから)`,
+        body: `新しいバージョン ${info.version} をインストールできます`,
       }).show()
     }
   })
@@ -329,10 +353,26 @@ function setupAutoUpdate() {
     updateChecking = false
     rebuildTrayMenu()
     console.error('[updater] error:', e.message)
+    setUpdaterState({ state: 'error', error: e.message })
   })
   autoUpdater.checkForUpdates().catch(() => {})
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000)
 }
+
+// Renderer bell button IPC.
+ipcMain.handle('updater:get', () => updaterState)
+ipcMain.handle('updater:check', () => {
+  if (isDev) return { ok: false, reason: 'dev' }
+  autoUpdater.checkForUpdates().catch(() => {})
+  return { ok: true }
+})
+ipcMain.handle('updater:install', () => {
+  if (updaterState.state !== 'ready') return { ok: false, reason: 'not-ready' }
+  app.isQuiting = true
+  // Slight defer so the IPC reply reaches the renderer before we tear down.
+  setTimeout(() => autoUpdater.quitAndInstall(), 200)
+  return { ok: true }
+})
 
 // Two instances would fight over the USB device and port 8787 — a second
 // launch just surfaces the existing window. SKIP_BACKEND runs are backendless
