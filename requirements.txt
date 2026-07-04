@@ -1,0 +1,10 @@
+pyusb>=1.2.1
+libusb-package>=1.0.26.2   # bundles libusb-1.0 DLL so pyusb works on Windows out of the box
+Pillow>=10.0.0             # image rendering (PIL)
+psutil>=5.9.0             # CPU load / RAM / clock (no admin, no temps)
+pythonnet>=3.0.0          # loads LibreHardwareMonitorLib.dll for CPU/GPU temps
+websockets               # WebSocket server bridging the editor to the LCD
+winsdk                   # WinRT: media session (now-playing) + toast notifications
+pyaudiowpatch            # WASAPI loopback capture for the audio spectrum
+numpy                    # FFT / band folding for the audio spectrum
+# LibreHardwareMonitorLib.dll + deps live in ./libs (bundled from LHM v0.9.6 release)

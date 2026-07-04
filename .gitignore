@@ -1,0 +1,22 @@
+# --- Node / Electron (app/) ---
+node_modules/
+app/dist/
+app/release/
+
+# --- Python bytecode ---
+__pycache__/
+*.pyc
+
+# --- PyInstaller output (server.spec is generated) ---
+build/
+
+# --- Third-party binaries (not committed) ---
+# libs/  = LibreHardwareMonitor DLLs (LHM v0.9.6)
+# redist/ = PawnIO_setup.exe
+libs/
+redist/
+
+# --- Personal / local ---
+.claude/
+*.log
+bg.gif

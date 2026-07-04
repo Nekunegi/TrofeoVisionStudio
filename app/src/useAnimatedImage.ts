@@ -1,0 +1,139 @@
+import { useEffect, useState } from 'react'
+import { loadBgMedia } from './bgStore'
+
+// Decode an image (animated GIF/WebP or static) and return the current frame as
+// a CanvasImageSource plus the source's native frame rate, advancing on our own
+// clock at the source's real timings. We drive frames ourselves because Chrome
+// throttles a plain <img>'s animation when it isn't the focused/visible tab;
+// the WebCodecs ImageDecoder + our own timer keeps playback at full speed in a
+// focused window / Electron (backgroundThrottling: false).
+//
+// Frames are decoded ON DEMAND (sequentially, one per tick) instead of being
+// pre-decoded: an 80-frame 1920x480 GIF pre-decoded to ImageBitmaps costs
+// ~300MB of RAM, while just-in-time decoding holds only the encoded buffer
+// plus two canvases (~7MB).
+//
+// Each decoded VideoFrame is immediately blitted into one of two persistent
+// canvases (double buffer) and closed — Konva only ever sees canvases, which
+// can't be invalidated. Handing VideoFrames to Konva directly caused visible
+// flicker on the panel: a frame could be close()d while a capture was drawing
+// it, yielding an intermittent background-less (dark) frame every ~0.5-1s.
+
+export interface AnimatedImage {
+  frame: CanvasImageSource | null
+  // Native frame rate of the source, or null for static images / no image.
+  // The stream loop uses this to match the LCD update rate to the animation.
+  fps: number | null
+}
+
+function mimeOf(src: string): string {
+  if (src.startsWith('data:')) return src.slice(5, src.indexOf(';'))
+  const s = src.toLowerCase()
+  if (s.endsWith('.gif')) return 'image/gif'
+  if (s.endsWith('.png')) return 'image/png'
+  if (s.endsWith('.webp')) return 'image/webp'
+  return 'image/jpeg'
+}
+
+export function useAnimatedImage(src: string | null): AnimatedImage {
+  const [frame, setFrame] = useState<CanvasImageSource | null>(null)
+  const [fps, setFps] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!src) { setFrame(null); setFps(null); return }
+    let cancelled = false
+    let raf = 0
+    let dec: any = null
+    let buffers: [HTMLCanvasElement, HTMLCanvasElement] | null = null
+    let flip = 0
+
+    // Blit the frame into the least-recently-shown buffer and release it.
+    // Alternating canvas references also makes react-konva redraw the layer.
+    const show = (vf: VideoFrame) => {
+      if (!buffers) {
+        buffers = [document.createElement('canvas'), document.createElement('canvas')]
+        for (const c of buffers) {
+          c.width = vf.displayWidth
+          c.height = vf.displayHeight
+        }
+      }
+      flip ^= 1
+      const c = buffers[flip]
+      c.getContext('2d')!.drawImage(vf, 0, 0)
+      vf.close()
+      setFrame(c)
+    }
+
+    const fallbackStatic = (actual: string) => {
+      const img = new Image()
+      img.onload = () => { if (!cancelled) { setFrame(img); setFps(null) } }
+      img.src = actual
+    }
+
+    async function run() {
+      // 'idb:bg' is the sentinel for user media persisted in IndexedDB
+      // (background GIFs blow the localStorage quota) — resolve it first.
+      const actual = src!.startsWith('idb:') ? await loadBgMedia() : src!
+      if (!actual || cancelled) { setFrame(null); setFps(null); return }
+      const AnyWin = window as unknown as { ImageDecoder?: any }
+      if (!AnyWin.ImageDecoder) { fallbackStatic(actual); return }
+      try {
+        const buf = await (await fetch(actual)).arrayBuffer()
+        dec = new AnyWin.ImageDecoder({ data: buf, type: mimeOf(actual) })
+        await dec.tracks.ready
+        const count = dec.tracks.selectedTrack?.frameCount ?? 1
+        if (cancelled) return
+
+        const first = await dec.decode({ frameIndex: 0 })
+        if (cancelled) { first.image.close(); return }
+
+        if (count <= 1) {
+          // Static image: keep a bitmap, release the decoder.
+          const bmp = await createImageBitmap(first.image)
+          first.image.close()
+          dec.close?.(); dec = null
+          if (cancelled) { bmp.close(); return }
+          setFrame(bmp); setFps(null)
+          return
+        }
+
+        let durMs = (first.image.duration ?? 100000) / 1000 // µs -> ms
+        setFps(Math.min(30, Math.max(1, Math.round(1000 / Math.max(durMs, 10)))))
+        show(first.image)
+
+        let idx = 0
+        let nextAt = performance.now() + durMs
+        let decoding = false
+        const tick = (t: number) => {
+          if (cancelled) return
+          if (t >= nextAt && !decoding) {
+            decoding = true
+            idx = (idx + 1) % count
+            dec.decode({ frameIndex: idx }).then(({ image }: { image: VideoFrame }) => {
+              decoding = false
+              if (cancelled) { image.close(); return }
+              durMs = (image.duration ?? 50000) / 1000
+              nextAt += durMs
+              // resync after a long stall (window hidden without throttling off, etc.)
+              if (performance.now() - nextAt > 1000) nextAt = performance.now() + durMs
+              show(image)
+            }).catch(() => { decoding = false })
+          }
+          raf = requestAnimationFrame(tick)
+        }
+        raf = requestAnimationFrame(tick)
+      } catch {
+        fallbackStatic(actual)
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+      dec?.close?.()
+    }
+  }, [src])
+
+  return { frame, fps }
+}

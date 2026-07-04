@@ -1,0 +1,475 @@
+import { forwardRef, useEffect, useRef, useState } from 'react'
+import {
+  Stage, Layer, Rect, Text, Group, Line, Circle, Shape,
+  Image as KImage, Transformer,
+} from 'react-konva'
+import type Konva from 'konva'
+import {
+  PANEL_W, PANEL_H, METRIC_LABELS,
+  type Layout, type MediaState, type Sensors, type Widget,
+} from './types'
+import {
+  FONT_NUM, FONT_LABEL, family, LABEL_FILL, PANEL_FILL, GLASS_TINT,
+  withAlpha, textW, fmt, fmtU, metricValue, GRAPH_SAMPLES, cardR, type BgEnv,
+} from './dashboard/theme'
+import { GlassPanel, PanelStroke, WidgetImage } from './dashboard/primitives'
+import { ToastCard, type LcdToast } from './dashboard/ToastCard'
+import { WeatherCard } from './dashboard/WeatherCard'
+import { MediaCard } from './dashboard/MediaCard'
+import { VisualizerBars } from './dashboard/VisualizerBars'
+
+export type { LcdToast }
+
+function renderInner(w: Widget, sensors: Sensors, now: Date, history: Sensors[], bg: BgEnv,
+  media: MediaState | null, spectrum: number[] | null) {
+  switch (w.type) {
+    case 'text':
+      return <Text text={w.text} fontSize={w.fontSize} fill={w.color}
+        fontStyle={w.bold ? '700' : '600'} fontFamily={family(w.font, FONT_LABEL)}
+        letterSpacing={w.fontSize * 0.04} />
+
+    case 'clock': {
+      const t = now.toLocaleTimeString(w.twelveHour ? 'en-US' : 'en-GB', {
+        hour12: w.twelveHour ?? false,
+        hour: '2-digit', minute: '2-digit',
+        ...(w.showSeconds ?? true ? { second: '2-digit' } : {}),
+      })
+      const d = now
+        .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        .toUpperCase()
+      // Digits have different advances ("1" is narrow) — center the text in a
+      // widest-digits reference box so the clock doesn't shift every second.
+      const fam = family(w.font, FONT_NUM)
+      const weight = w.bold ? '700' : '500'
+      const boxW = textW(t.replace(/\d/g, '8'), w.fontSize, fam, weight)
+        + w.fontSize * 0.05 * t.length // letterSpacing isn't in canvas measureText
+      return (
+        <>
+          {w.withDate && (
+            <Text text={d} y={-w.fontSize * 0.46} width={boxW} align="center"
+              fontSize={w.fontSize * 0.28}
+              fill={LABEL_FILL} fontFamily={FONT_LABEL} fontStyle="600"
+              letterSpacing={w.fontSize * 0.06}
+              shadowColor="#000" shadowBlur={4} shadowOpacity={0.8} />
+          )}
+          {/* dark halo, not a colored glow — the clock must survive bright backgrounds */}
+          <Text text={t} width={boxW} align="center" fontSize={w.fontSize} fill={w.color}
+            fontStyle={weight} fontFamily={fam}
+            letterSpacing={w.fontSize * 0.05}
+            shadowColor="#000" shadowBlur={w.fontSize * 0.22} shadowOpacity={0.9} />
+        </>
+      )
+    }
+
+    case 'sensor': {
+      const v = metricValue(sensors, w.metric)
+      const nd = w.unit === 'W' || w.unit === 'MB/s' ? 1 : 0
+      const num = fmt(v, nd)
+      const fs = w.fontSize
+      const fam = family(w.font, FONT_NUM)
+      const labelFs = Math.max(15, fs * 0.18)
+      const numW = textW(num, fs, fam, '700')
+      return (
+        <>
+          {/* accent tick + caption above the numeral */}
+          <Rect x={2} y={-labelFs * 1.55} width={4} height={labelFs * 1.05}
+            fill={w.color} cornerRadius={2}
+            shadowColor={w.color} shadowBlur={6} shadowOpacity={0.8} />
+          <Text x={14} y={-labelFs * 1.5} text={w.label.toUpperCase()} fontSize={labelFs}
+            fill={LABEL_FILL} fontFamily={FONT_LABEL} fontStyle="600"
+            letterSpacing={labelFs * 0.18} />
+          <Text text={num} fontSize={fs} fill={w.color} fontFamily={fam}
+            fontStyle={w.bold ? '700' : '500'}
+            shadowColor={w.color} shadowBlur={fs * 0.15} shadowOpacity={0.45} />
+          <Text x={numW + fs * 0.08} y={fs * 0.16} text={w.unit} fontSize={fs * 0.36}
+            fill={withAlpha(w.color, 0.75)} fontFamily={FONT_LABEL} fontStyle="600" />
+        </>
+      )
+    }
+
+    case 'bar': {
+      const v = metricValue(sensors, w.metric)
+      const frac = Math.max(0, Math.min((v ?? 0) / w.max, 1))
+      const h = w.height
+      const unit = METRIC_LABELS[w.metric].unit
+      const rowFs = Math.max(16, Math.min(28, h * 1.1))
+      return (
+        <>
+          {w.label && (
+            <>
+              <Text y={-rowFs * 1.5} text={w.label.toUpperCase()} fontSize={rowFs}
+                fill="rgba(255,255,255,0.85)" fontFamily={FONT_LABEL} fontStyle="600"
+                letterSpacing={rowFs * 0.14}
+                shadowColor="#000" shadowBlur={5} shadowOpacity={0.85} />
+              <Text y={-rowFs * 1.5} width={w.width} align="right"
+                text={fmtU(v, unit)} fontSize={rowFs} fill={w.color}
+                fontFamily={FONT_NUM} fontStyle="500"
+                shadowColor="#000" shadowBlur={5} shadowOpacity={0.85} />
+            </>
+          )}
+          {(w.panelBlur ?? 0) > 0 && bg.el ? (
+            <GlassPanel w={w.width} h={h} radius={h / 2}
+              blur={w.panelBlur!} tint={GLASS_TINT} bg={bg} />
+          ) : (
+            <Rect width={w.width} height={h} cornerRadius={h / 2}
+              fill="rgba(5,7,12,0.6)" />
+          )}
+          <Rect width={w.width} height={h} cornerRadius={h / 2}
+            stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
+          {frac > 0.01 && (
+            <Rect x={2} y={2} width={Math.max(h - 4, (w.width - 4) * frac)} height={h - 4}
+              cornerRadius={(h - 4) / 2}
+              fillLinearGradientStartPoint={{ x: 0, y: 0 }}
+              fillLinearGradientEndPoint={{ x: w.width, y: 0 }}
+              fillLinearGradientColorStops={[0, withAlpha(w.color, 0.45), 1, w.color]}
+              shadowColor={w.color} shadowBlur={8} shadowOpacity={0.5} />
+          )}
+        </>
+      )
+    }
+
+    case 'image':
+      return <WidgetImage w={w} />
+
+    case 'gauge': {
+      const v = metricValue(sensors, w.metric)
+      const unit = METRIC_LABELS[w.metric].unit
+      const frac = Math.max(0, Math.min((v ?? 0) / w.max, 1))
+      const size = w.size
+      const c = size / 2
+      const th = size * 0.075 // arc stroke thickness
+      const r = c - th / 2 - size * 0.02
+      const start = Math.PI * 0.75 // 270° sweep opening downward
+      const span = Math.PI * 1.5
+      const tipA = start + span * frac
+      const disp = v == null ? '--' : v.toFixed(0)
+      return (
+        <>
+          {/* smoked/frosted-glass disc so the gauge stays readable over any background */}
+          {(w.panelBlur ?? 0) > 0 && bg.el ? (
+            <GlassPanel w={size} h={size} circle
+              blur={w.panelBlur!} tint={GLASS_TINT} bg={bg} />
+          ) : (
+            <Circle x={c} y={c} radius={c} fill={PANEL_FILL} />
+          )}
+          <PanelStroke w={size} h={size} circle />
+          {/* track */}
+          <Shape
+            sceneFunc={(ctx, sh) => {
+              ctx.beginPath()
+              ctx.arc(c, c, r, start, start + span)
+              ctx.fillStrokeShape(sh)
+            }}
+            stroke="rgba(255,255,255,0.10)" strokeWidth={th} lineCap="round" />
+          {/* tick marks just inside the track */}
+          <Shape
+            sceneFunc={(ctx, sh) => {
+              ctx.beginPath()
+              const r1 = r - th * 0.95
+              const r2 = r1 - size * 0.035
+              for (let i = 0; i <= 27; i++) {
+                const a = start + (span * i) / 27
+                ctx.moveTo(c + Math.cos(a) * r1, c + Math.sin(a) * r1)
+                ctx.lineTo(c + Math.cos(a) * r2, c + Math.sin(a) * r2)
+              }
+              ctx.fillStrokeShape(sh)
+            }}
+            stroke="rgba(255,255,255,0.16)" strokeWidth={Math.max(1.5, size * 0.006)} />
+          {/* value arc + glowing tip */}
+          {frac > 0.005 && (
+            <Shape
+              sceneFunc={(ctx, sh) => {
+                ctx.beginPath()
+                ctx.arc(c, c, r, start, tipA)
+                ctx.fillStrokeShape(sh)
+              }}
+              stroke={w.color} strokeWidth={th} lineCap="round"
+              shadowColor={w.color} shadowBlur={size * 0.045} shadowOpacity={0.7} />
+          )}
+          <Circle x={c + Math.cos(tipA) * r} y={c + Math.sin(tipA) * r}
+            radius={th * 0.26} fill="#ffffff"
+            shadowColor={w.color} shadowBlur={size * 0.03} shadowOpacity={0.9} />
+          {/* numeral, unit, and label in the 90° opening at the bottom */}
+          <Text y={c - size * 0.175} width={size} align="center" text={disp}
+            fontSize={size * 0.30} fill={w.color} fontFamily={FONT_NUM} fontStyle="700"
+            shadowColor={w.color} shadowBlur={size * 0.035} shadowOpacity={0.45} />
+          <Text y={c + size * 0.155} width={size} align="center" text={unit}
+            fontSize={size * 0.08} fill={LABEL_FILL} fontFamily={FONT_LABEL}
+            fontStyle="600" letterSpacing={size * 0.008} />
+          <Text y={size - size * 0.115} width={size} align="center"
+            text={w.label.toUpperCase()} fontSize={size * 0.085}
+            fill="rgba(255,255,255,0.8)" fontFamily={FONT_LABEL} fontStyle="700"
+            letterSpacing={size * 0.012} />
+        </>
+      )
+    }
+
+    case 'graph': {
+      // Last GRAPH_SAMPLES 1Hz samples drawn left (oldest) to right (newest),
+      // anchored to the right edge while the buffer fills.
+      const vals = history.slice(-GRAPH_SAMPLES).map((h) => metricValue(h, w.metric))
+      const unit = METRIC_LABELS[w.metric].unit
+      const r = cardR(w.height)
+      const headFs = Math.max(16, Math.min(26, w.height * 0.12))
+      const padTop = headFs * 2.1 // keep the plot clear of the header row
+      const plotH = w.height - padTop - 10
+      const pts: number[] = []
+      const n = GRAPH_SAMPLES - 1
+      vals.forEach((v, i) => {
+        if (v == null) return
+        const frac = Math.max(0, Math.min(v / w.max, 1))
+        pts.push(((GRAPH_SAMPLES - vals.length + i) / n) * w.width,
+          padTop + (1 - frac) * plotH)
+      })
+      const last = vals.length ? vals[vals.length - 1] : null
+      const lastX = pts.length ? pts[pts.length - 2] : 0
+      const lastY = pts.length ? pts[pts.length - 1] : 0
+      return (
+        <>
+          {(w.panelBlur ?? 0) > 0 && bg.el ? (
+            <GlassPanel w={w.width} h={w.height} radius={r}
+              blur={w.panelBlur!} tint={GLASS_TINT} bg={bg} />
+          ) : (
+            <Rect width={w.width} height={w.height} cornerRadius={r} fill={PANEL_FILL} />
+          )}
+          <PanelStroke w={w.width} h={w.height} r={r} />
+          {[0.25, 0.5, 0.75].map((f) => (
+            <Line key={f}
+              points={[12, padTop + plotH * f, w.width - 12, padTop + plotH * f]}
+              stroke="rgba(255,255,255,0.07)" strokeWidth={1} dash={[3, 7]} />
+          ))}
+          {/* plot clipped to the rounded card so the curve/area never escape */}
+          <Group clipFunc={(c2) => {
+            c2.beginPath()
+            c2.roundRect(0, 0, w.width, w.height, r)
+          }}>
+            {pts.length >= 4 && (
+              <>
+                {/* straight-edged closure (tension 0) — a smoothed closing path
+                    bows into the card corner and reads as a stray line */}
+                <Line
+                  points={[...pts, lastX, w.height + 8, pts[0], w.height + 8]}
+                  closed tension={0} strokeEnabled={false}
+                  fillLinearGradientStartPoint={{ x: 0, y: padTop }}
+                  fillLinearGradientEndPoint={{ x: 0, y: w.height }}
+                  fillLinearGradientColorStops={[
+                    0, withAlpha(w.color, 0.32), 1, withAlpha(w.color, 0.02)]} />
+                <Line points={pts} tension={0.3} stroke={w.color} strokeWidth={3}
+                  lineCap="round" lineJoin="round"
+                  shadowColor={w.color} shadowBlur={8} shadowOpacity={0.7} />
+                <Circle x={lastX} y={lastY} radius={4.5} fill="#ffffff"
+                  shadowColor={w.color} shadowBlur={9} shadowOpacity={0.9} />
+              </>
+            )}
+          </Group>
+          <Text x={16} y={headFs * 0.62} text={w.label.toUpperCase()} fontSize={headFs}
+            fill={LABEL_FILL} fontFamily={FONT_LABEL} fontStyle="600"
+            letterSpacing={headFs * 0.14} />
+          <Text x={0} y={headFs * 0.62} width={w.width - 16} align="right"
+            text={fmtU(last, unit)} fontSize={headFs * 1.15} fill={w.color}
+            fontFamily={FONT_NUM} fontStyle="600"
+            shadowColor={w.color} shadowBlur={6} shadowOpacity={0.4} />
+        </>
+      )
+    }
+
+    case 'media':
+      return <MediaCard w={w} media={media} bg={bg} now={now} />
+
+    case 'weather':
+      return <WeatherCard w={w} bg={bg} />
+
+    case 'visualizer':
+      return <VisualizerBars w={w} spectrum={spectrum} />
+  }
+}
+
+interface Props {
+  layout: Layout
+  sensors: Sensors
+  now: Date
+  // Rolling 1Hz sensor history (oldest first) for graph widgets.
+  history: Sensors[]
+  // Active Windows toasts overlaid top-right on the LCD (max ~3).
+  toasts?: LcdToast[]
+  // Current background frame (from useAnimatedImage — advances GIF frames itself).
+  bgEl?: CanvasImageSource | null
+  // Now-playing session for media widgets.
+  media?: MediaState | null
+  // Loopback audio spectrum (SPECTRUM_BANDS values, 0..1) for visualizer widgets.
+  spectrum?: number[] | null
+  editable?: boolean
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
+  onMove?: (id: string, x: number, y: number) => void
+  // Fired when the user resizes via the transformer handles: scale factors the
+  // widget should absorb into its own size fields, plus the (possibly moved) origin.
+  onResize?: (id: string, sx: number, sy: number, x: number, y: number) => void
+}
+
+// Text-like widgets scale uniformly (fontSize); box-like ones resize freely.
+function keepRatio(w: Widget): boolean {
+  return w.type === 'text' || w.type === 'clock' || w.type === 'sensor' || w.type === 'gauge'
+}
+
+/** The 1920x480 Konva stage: interactive editor AND the frame source.
+ *  Layer 0 holds the LCD content (captured via toDataURL); editor chrome
+ *  (the resize transformer) lives on layer 1 so it never reaches the panel. */
+// Drag snapping: widget edges/centers attract to canvas edges/center and to
+// other widgets' edges/centers within this many px.
+const SNAP_PX = 8
+
+const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
+  { layout, sensors, now, history, toasts = [], bgEl, media = null, spectrum = null,
+    editable = false, selectedId, onSelect, onMove, onResize }, ref,
+) {
+  const trRef = useRef<Konva.Transformer>(null)
+  const groupRefs = useRef(new Map<string, Konva.Group>())
+  const selected = layout.widgets.find((w) => w.id === selectedId)
+  // Guide lines shown while a drag is snapped (editor chrome layer only).
+  const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
+  const bgEnv: BgEnv = {
+    el: bgEl ?? null,
+    color: layout.bgColor,
+    blur: layout.bgBlur ?? 0,
+    dim: layout.bgDim ?? 0,
+  }
+
+  const snapDragMove = (id: string, e: Konva.KonvaEventObject<DragEvent>) => {
+    // Alt = precision drag, no snapping
+    if (e.evt?.altKey) { setGuides({ v: [], h: [] }); return }
+    const node = e.target
+    const skip = { skipShadow: true, skipStroke: true }
+    const r = node.getClientRect(skip)
+    const vTargets = [0, PANEL_W / 2, PANEL_W]
+    const hTargets = [0, PANEL_H / 2, PANEL_H]
+    for (const other of layout.widgets) {
+      if (other.id === id) continue
+      const g = groupRefs.current.get(other.id)
+      if (!g) continue
+      const o = g.getClientRect(skip)
+      vTargets.push(o.x, o.x + o.width / 2, o.x + o.width)
+      hTargets.push(o.y, o.y + o.height / 2, o.y + o.height)
+    }
+    let bestV: { delta: number; line: number } | null = null
+    for (const line of vTargets) {
+      for (const edge of [r.x, r.x + r.width / 2, r.x + r.width]) {
+        const d = line - edge
+        if (Math.abs(d) <= SNAP_PX && (!bestV || Math.abs(d) < Math.abs(bestV.delta))) {
+          bestV = { delta: d, line }
+        }
+      }
+    }
+    let bestH: { delta: number; line: number } | null = null
+    for (const line of hTargets) {
+      for (const edge of [r.y, r.y + r.height / 2, r.y + r.height]) {
+        const d = line - edge
+        if (Math.abs(d) <= SNAP_PX && (!bestH || Math.abs(d) < Math.abs(bestH.delta))) {
+          bestH = { delta: d, line }
+        }
+      }
+    }
+    if (bestV) node.x(node.x() + bestV.delta)
+    if (bestH) node.y(node.y() + bestH.delta)
+    setGuides({ v: bestV ? [bestV.line] : [], h: bestH ? [bestH.line] : [] })
+  }
+
+  useEffect(() => {
+    const tr = trRef.current
+    if (!tr) return
+    const node = selectedId ? groupRefs.current.get(selectedId) : null
+    tr.nodes(node ? [node] : [])
+    tr.getLayer()?.batchDraw()
+  }, [selectedId, layout])
+
+  return (
+    <Stage
+      ref={ref}
+      width={PANEL_W}
+      height={PANEL_H}
+      onMouseDown={(e) => {
+        if (editable && e.target === e.target.getStage()) onSelect?.(null)
+      }}
+    >
+      <Layer>
+        <Rect width={PANEL_W} height={PANEL_H} fill={layout.bgColor} />
+        {bgEl && ((layout.bgBlur ?? 0) > 0 ? (
+          // Canvas 2D filter blur (GPU-backed in Chromium). Drawn oversized so
+          // blur sampling past the edges never shows transparent fringes.
+          <Shape sceneFunc={(ctx) => {
+            const blur = layout.bgBlur ?? 0
+            const pad = blur * 2
+            const c2 = ctx._context
+            c2.save()
+            c2.filter = `blur(${blur}px)`
+            c2.drawImage(bgEl, -pad, -pad, PANEL_W + pad * 2, PANEL_H + pad * 2)
+            c2.restore()
+          }} />
+        ) : (
+          <KImage image={bgEl} width={PANEL_W} height={PANEL_H} />
+        ))}
+        {bgEl && (layout.bgDim ?? 0) > 0 && (
+          <Rect width={PANEL_W} height={PANEL_H} fill="#000"
+            opacity={Math.min(0.9, layout.bgDim ?? 0)} />
+        )}
+        {layout.widgets.map((w) => (
+          <Group
+            key={w.id}
+            ref={(node) => {
+              if (node) groupRefs.current.set(w.id, node)
+              else groupRefs.current.delete(w.id)
+            }}
+            x={w.x}
+            y={w.y}
+            opacity={w.opacity ?? 1}
+            draggable={editable}
+            onMouseDown={() => editable && onSelect?.(w.id)}
+            onDragMove={(e) => editable && snapDragMove(w.id, e)}
+            onDragEnd={(e) => {
+              setGuides({ v: [], h: [] })
+              onMove?.(w.id, Math.round(e.target.x()), Math.round(e.target.y()))
+            }}
+            onTransformEnd={(e) => {
+              const node = e.target
+              onResize?.(w.id, node.scaleX(), node.scaleY(),
+                Math.round(node.x()), Math.round(node.y()))
+              node.scale({ x: 1, y: 1 })
+            }}
+          >
+            {renderInner(w, sensors, now, history, bgEnv, media, spectrum)}
+          </Group>
+        ))}
+        {toasts.map((t, i) => <ToastCard key={t.id} t={t} index={i} bg={bgEnv} />)}
+      </Layer>
+      {editable && (
+        <Layer>
+          {guides.v.map((x) => (
+            <Line key={`v${x}`} points={[x, 0, x, PANEL_H]}
+              stroke="#ff4dd2" strokeWidth={1.5} dash={[6, 6]} listening={false} />
+          ))}
+          {guides.h.map((y) => (
+            <Line key={`h${y}`} points={[0, y, PANEL_W, y]}
+              stroke="#ff4dd2" strokeWidth={1.5} dash={[6, 6]} listening={false} />
+          ))}
+          <Transformer
+            ref={trRef}
+            rotateEnabled={false}
+            flipEnabled={false}
+            keepRatio={selected ? keepRatio(selected) : true}
+            enabledAnchors={selected && !keepRatio(selected)
+              ? undefined /* all anchors */
+              : ['top-left', 'top-right', 'bottom-left', 'bottom-right']}
+            anchorStroke="#4de1ff"
+            anchorFill="#0b0d12"
+            anchorCornerRadius={5}
+            anchorSize={11}
+            borderStroke="#4de1ff"
+            borderDash={[7, 5]}
+          />
+        </Layer>
+      )}
+    </Stage>
+  )
+})
+
+export default DashboardStage
