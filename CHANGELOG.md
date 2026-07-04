@@ -4,6 +4,50 @@ All notable changes to Trofeo Vision Studio are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **First-run wizard**: modal shown once on the very first launch. Live
+  status pills for backend WS link, LCD detection, CPU-temperature
+  availability, and the Windows notification permission — failing pills
+  deep-link to the anchor in `docs/TROUBLESHOOTING.md` that explains the fix.
+- **docs/TROUBLESHOOTING.md** covering SmartScreen, Zadig, non-admin CPU
+  temperature, HVCI + PawnIO, autostart repair, LCD freeze triage, audio
+  visualizer recovery, and log file locations.
+- **docs/PROTOCOL.md**: dedicated byte-level LY-bulk reference (handshake
+  packet layout, 16-byte chunk header fields, burst structure, worked
+  examples, error-recovery flow).
+- **README.en.md** — English port of the Japanese README, with a
+  language switcher in both files.
+- **CI + release automation** — `.github/workflows/ci.yml` runs lint +
+  build + pytest + vitest on push / PR; `.github/workflows/release.yml`
+  builds a full installer (including LHM DLLs auto-fetched from GitHub)
+  and publishes a GitHub Release when a `v*` tag is pushed.
+- **Baseline test coverage** — pytest golden-fixture suite freezes the
+  LY chunk header layout (8 tests). Vitest covers layoutStore migration
+  and every branch of `substituteTemplate` (15 tests).
+- **CI + latest-release badges** in both READMEs.
+
+### Changed
+- Electron renderer hardened: `sandbox: true`, `contextIsolation: true`,
+  `nodeIntegration: false`, `webSecurity: true`, empty preload, plus a
+  strict `Content-Security-Policy` header (script-src `'self' app:`,
+  connect-src limited to loopback WebSocket + Open-Meteo).
+- `window.open` denied and `will-navigate` blocked outside the app bundle.
+- WebSocket handler rejects cross-origin browser connections with a 1008
+  policy-violation code (allowlists `app://` and localhost).
+- Debug hooks (`DEBUG_EVAL`, `DEBUG_SHOT`, `DEBUG_FRAME`, `DEBUG_QUIT_AFTER`)
+  gated to `isDev` or an explicit `TROFEO_DEV=1` — they no longer respond
+  to environment variables in a stock packaged build.
+- Packaging: `redist/PawnIO_setup.exe` is now optional (the installer's
+  NSIS macro skips PawnIO if the redist isn't present), so CI-built
+  releases can omit it without a build failure.
+
+### Fixed
+- README screenshots re-shot with real sensor values (CPU 52°C etc.) via
+  a new `window.__injectSensors` debug hook — the earlier non-admin
+  smoke-test screenshots showed `--°C` for CPU temperature.
+
 ## [1.8.0] — 2026-07-05
 
 ### Added
