@@ -1,5 +1,6 @@
 import { Eye, EyeOff, Lock, Unlock, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
 import type { Widget } from '../types'
+import { useT } from '../i18n'
 
 // Human-readable label for the widget's type badge.
 const TYPE_LABEL: Record<Widget['type'], string> = {
@@ -34,8 +35,9 @@ interface Props {
 export function LayerPanel({
   widgets, selectedId, onSelect, onUpdate, onDelete, onReorder,
 }: Props) {
+  const t = useT()
   if (!widgets.length) {
-    return <p className="muted">ウィジェットがありません。左上の Add widget から追加してください。</p>
+    return <p className="muted">{t('layers.empty')}</p>
   }
   // Show top-of-stack first (App renders widgets in array order — last = on top).
   const rows = widgets.slice().reverse()
@@ -50,23 +52,23 @@ export function LayerPanel({
               <span className="type">{TYPE_LABEL[w.type]}</span>
               <span className="name">{widgetName(w)}</span>
             </button>
-            <button title="Bring forward" onClick={() => onReorder(w.id, 'up')}>
+            <button title={t('layers.up')} onClick={() => onReorder(w.id, 'up')}>
               <ChevronUp size={12} />
             </button>
-            <button title="Send backward" onClick={() => onReorder(w.id, 'down')}>
+            <button title={t('layers.down')} onClick={() => onReorder(w.id, 'down')}>
               <ChevronDown size={12} />
             </button>
-            <button title={w.hidden ? '表示に戻す' : '非表示'}
+            <button title={w.hidden ? t('layers.show') : t('layers.hide')}
               className={w.hidden ? 'toggled' : ''}
               onClick={() => onUpdate(w.id, { hidden: !w.hidden })}>
               {w.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
             </button>
-            <button title={w.locked ? 'ロック解除' : 'ロック'}
+            <button title={w.locked ? t('layers.unlock') : t('layers.lock')}
               className={w.locked ? 'toggled' : ''}
               onClick={() => onUpdate(w.id, { locked: !w.locked })}>
               {w.locked ? <Lock size={12} /> : <Unlock size={12} />}
             </button>
-            <button title="削除" className="danger"
+            <button title={t('layers.delete')} className="danger"
               onClick={() => onDelete(w.id)}>
               <Trash2 size={12} />
             </button>

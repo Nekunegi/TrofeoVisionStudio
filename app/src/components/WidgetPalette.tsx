@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import type { Widget } from '../types'
 import { fileToWidgetImage } from '../imageUtils'
+import { useT } from '../i18n'
 
 interface Item {
   key: string
@@ -18,13 +19,14 @@ interface Item {
 
 interface Category {
   cat: string
+  catKey: 'sensor' | 'text' | 'media' | 'image'
   items: Item[]
 }
 
 // Search matches on key, label, and aliases (Japanese + English keywords).
 const CATALOG: Category[] = [
   {
-    cat: 'センサー',
+    cat: 'センサー', catKey: 'sensor',
     items: [
       {
         key: 'sensor', label: 'Sensor', icon: Activity,
@@ -61,7 +63,7 @@ const CATALOG: Category[] = [
     ],
   },
   {
-    cat: '時計・テキスト',
+    cat: '時計・テキスト', catKey: 'text',
     items: [
       {
         key: 'clock', label: 'Clock', icon: ClockIcon,
@@ -82,7 +84,7 @@ const CATALOG: Category[] = [
     ],
   },
   {
-    cat: 'メディア',
+    cat: 'メディア', catKey: 'media',
     items: [
       {
         key: 'media', label: 'Media', icon: Music,
@@ -112,7 +114,7 @@ const CATALOG: Category[] = [
     ],
   },
   {
-    cat: '画像',
+    cat: '画像', catKey: 'image',
     items: [
       {
         key: 'image', label: 'Image', icon: ImagePlus,
@@ -137,6 +139,7 @@ interface Props {
 }
 
 export function WidgetPalette({ newId, onAdd }: Props) {
+  const t = useT()
   const [q, setQ] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -179,15 +182,15 @@ export function WidgetPalette({ newId, onAdd }: Props) {
         <input ref={inputRef} type="search" value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="検索 (sensor / 温度 / clock ...)"
-          aria-label="ウィジェット検索" />
+          placeholder={t('palette.searchPlaceholder')}
+          aria-label={t('palette.searchLabel')} />
       </div>
       {filtered.length === 0 && (
-        <p className="muted">一致するウィジェットがありません</p>
+        <p className="muted">{t('palette.empty')}</p>
       )}
       {filtered.map((c) => (
         <div key={c.cat} className="palette-cat">
-          <div className="palette-cat-label">{c.cat}</div>
+          <div className="palette-cat-label">{t(`palette.cat.${c.catKey}` as const)}</div>
           <div className="btns">
             {c.items.map((item) => {
               const Icon = item.icon

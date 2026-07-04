@@ -9,7 +9,7 @@ import DashboardStage, { type LcdToast } from './DashboardStage'
 import { useBackend } from './useBackend'
 import { useAnimatedImage } from './useAnimatedImage'
 import { useAudioSpectrum } from './useAudioSpectrum'
-import { IDB_BG, saveBgMedia } from './bgStore'
+import { IDB_BG, IDB_BG_VIDEO, saveBgMedia, saveBgVideo } from './bgStore'
 import {
   PANEL_W, PANEL_H, defaultLayout,
   type Layout, type Widget, type Sensors,
@@ -17,19 +17,23 @@ import {
 import { LS_KEY, loadLayout } from './layoutStore'
 import { fileToDataUrl } from './imageUtils'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
-import { SensorReadout } from './components/SensorReadout'
 import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
 import { LayerPanel } from './components/LayerPanel'
 import { WidgetPalette } from './components/WidgetPalette'
 import { FirstRunWizard } from './components/FirstRunWizard'
 import { UpdateBell } from './components/UpdateBell'
+import { LangToggle } from './components/LangToggle'
+import { BgEditorModal } from './components/BgEditorModal'
+import { useT } from './i18n'
+import pkg from '../package.json'
 import './App.css'
 
 let idc = 0
 const newId = (t: string) => `${t}-${Date.now()}-${idc++}`
 
 export default function App() {
+  const t = useT()
   const backend = useBackend()
   // Stable reference — the stream interval effect must NOT depend on `backend`
   // itself (new object every render; with an animated bg re-rendering at 20fps
@@ -76,6 +80,8 @@ export default function App() {
   const [streaming, setStreaming] = useState(true)
   const [measuredFps, setMeasuredFps] = useState(0)
   const [history, setHistory] = useState<Sensors[]>([])
+  // Background editor modal open state.
+  const [bgEditorOpen, setBgEditorOpen] = useState(false)
 
   const stageRef = useRef<Konva.Stage>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -91,8 +97,13 @@ export default function App() {
   // Stream rate follows the content: static layouts only change at 1Hz (clock /
   // sensors), animated backgrounds stream at their native frame rate (capped).
   const targetFps = Math.min(bgFps ?? 1, fpsCeiling)
-  // Panel mounting is upside-down by default — see Layout.rotate180.
-  const rotate180 = layout.rotate180 ?? true
+  // Panel mounting orientation. Legacy `rotate180` maps to 180°; new field
+  // `panelRotate` supersedes it and adds 90/270 for portrait mounting.
+  const panelRotate: 0 | 90 | 180 | 270 =
+    layout.panelRotate ?? (layout.rotate180 === false ? 0 : 180)
+  const isPortrait = panelRotate === 90 || panelRotate === 270
+  const logicalW = isPortrait ? PANEL_H : PANEL_W
+  const logicalH = isPortrait ? PANEL_W : PANEL_H
 
   // Smoothed sensor values drive the LCD widgets (raw 1Hz values feed history).
   const { display: displaySensors, animating: sensorsAnimating } = useSmoothedSensors(backend.sensors)
@@ -145,10 +156,28 @@ export default function App() {
     ]).then(() => setFontEpoch((e) => e + 1))
   }, [])
 
+  // Debounce the layout save — otherwise every mouse-move during a drag
+  // stringifies and rewrites the layout (~60 writes/sec), which slows the
+  // main thread and pointlessly wears localStorage.
+  const savedWarnedRef = useRef(false)
   useEffect(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(layout)) }
-    catch { /* quota exceeded (large embedded media) — skip persistence */ }
-  }, [layout])
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify(layout))
+      } catch (e) {
+        if (!savedWarnedRef.current) {
+          savedWarnedRef.current = true
+          pushToast({
+            id: -Date.now(),
+            app: 'Trofeo Vision Studio',
+            title: 'レイアウト保存失敗',
+            body: `localStorage の容量を超えました — 再起動でリセットされます (${e instanceof Error ? e.message : ''})`,
+          })
+        }
+      }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [layout, pushToast])
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
@@ -163,36 +192,55 @@ export default function App() {
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setScale(Math.min(1, el.clientWidth / PANEL_W)))
+    // Fit both dimensions: portrait would be 480×1920 (way taller than wide),
+    // so we cap by height too — 420px is a comfortable viewport slice.
+    const MAX_H = 420
+    const fit = () => {
+      const s = Math.min(1, el.clientWidth / logicalW, MAX_H / logicalH)
+      setScale(s)
+    }
+    const ro = new ResizeObserver(fit)
+    fit()
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [logicalW, logicalH])
 
-  // Reused offscreen canvas for the 180° output rotation (editor stays upright).
+  // Reused offscreen canvas for the panel-rotation compositing (editor stays
+  // in logical coords; this canvas is the physical 1920×480 hardware buffer).
   const rotCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  // Keep dynamic scheduling parameters in refs so we can read the latest
+  // value inside a long-lived setTimeout chain WITHOUT tearing down the loop
+  // every time streamFps flips (which happens 20+ times/sec as sensors ease).
+  const streamFpsRef = useRef(streamFps)
+  const panelRotateRef = useRef<0 | 90 | 180 | 270>(panelRotate)
+  const linkRef = useRef(backend.link)
+  streamFpsRef.current = streamFps
+  panelRotateRef.current = panelRotate
+  linkRef.current = backend.link
 
   useEffect(() => {
     if (!streaming) return
     let n = 0
     const t0 = performance.now()
     let lastReport = t0
-    let encoding = false // skip a tick if the previous JPEG encode is still in flight
-    const t = setInterval(() => {
-      if (encoding) return
+    let cancelled = false
+    let handle: ReturnType<typeof setTimeout> | null = null
+
+    const tick = () => {
+      if (cancelled) return
       const stage = stageRef.current
-      if (!stage) return
-      // Capture only the content layer — layer 1 holds editor chrome (resize
-      // handles) that must never reach the panel.
+      if (!stage) { handle = setTimeout(tick, 100); return }
+      // Skip encoding entirely if the backend socket is dead — sendFrame
+      // would silently drop the bytes anyway. Poll at 1Hz to catch reconnect.
+      if (linkRef.current !== 'open') {
+        handle = setTimeout(tick, 1000)
+        return
+      }
       const l = layoutRef.current
       const contrast = l.lcdContrast ?? 1
       const saturation = l.lcdSaturation ?? 1
       const brightness = l.lcdBrightness ?? 1
       const needsFilter = contrast !== 1 || saturation !== 1 || brightness !== 1
-      // Always route through an offscreen canvas: it normalizes any Konva
-      // devicePixelRatio scaling to true panel resolution AND lets us apply
-      // ctx.filter for the LCD-adjust compensator. toBlob → arrayBuffer skips
-      // the base64 round-trip that toDataURL forces (encode-to-base64 in
-      // Chromium then decode-back-to-bytes in JS).
       const src = stage.getLayers()[0].getCanvas()._canvas
       let rc = rotCanvasRef.current
       if (!rc) {
@@ -206,28 +254,53 @@ export default function App() {
       if (needsFilter) {
         ctx.filter = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`
       }
-      if (rotate180) {
-        ctx.translate(PANEL_W, PANEL_H)
-        ctx.rotate(Math.PI)
+      const rot = panelRotateRef.current
+      switch (rot) {
+        case 0:
+          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
+          break
+        case 90:
+          ctx.translate(PANEL_W, 0)
+          ctx.rotate(Math.PI / 2)
+          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_H, PANEL_W)
+          break
+        case 180:
+          ctx.translate(PANEL_W, PANEL_H)
+          ctx.rotate(Math.PI)
+          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
+          break
+        case 270:
+          ctx.translate(0, PANEL_H)
+          ctx.rotate(-Math.PI / 2)
+          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_H, PANEL_W)
+          break
       }
-      ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
       ctx.restore()
-      encoding = true
+
+      const emitAt = performance.now()
       rc.toBlob(async (blob) => {
-        encoding = false
-        if (!blob) return
-        const buf = await blob.arrayBuffer()
-        sendFrame(new Uint8Array(buf))
-        n++
-        const p = performance.now()
-        if (p - lastReport >= 1000) {
-          setMeasuredFps(Math.round((n / ((p - t0) / 1000)) * 10) / 10)
-          lastReport = p
+        if (cancelled) return
+        if (blob) {
+          const buf = await blob.arrayBuffer()
+          if (cancelled) return
+          sendFrame(new Uint8Array(buf))
+          n++
+          const p = performance.now()
+          if (p - lastReport >= 1000) {
+            setMeasuredFps(Math.round((n / ((p - t0) / 1000)) * 10) / 10)
+            lastReport = p
+          }
         }
+        // Self-schedule the next tick against the CURRENT streamFps target.
+        // Reading through a ref avoids the effect-teardown thrash that
+        // happens whenever sensors flip sensorsAnimating on/off.
+        const nextIn = Math.max(15, Math.round(1000 / streamFpsRef.current) - (performance.now() - emitAt))
+        if (!cancelled) handle = setTimeout(tick, Math.max(0, nextIn))
       }, 'image/jpeg', 0.72)
-    }, Math.max(15, Math.round(1000 / streamFps))) // 15ms floor ≈ the 60fps cap
-    return () => clearInterval(t)
-  }, [streaming, sendFrame, streamFps, rotate180])
+    }
+    handle = setTimeout(tick, 0)
+    return () => { cancelled = true; if (handle) clearTimeout(handle) }
+  }, [streaming, sendFrame])
 
   const selected = useMemo(
     () => layout.widgets.find((w) => w.id === selectedId) ?? null,
@@ -335,8 +408,13 @@ export default function App() {
 
   // Keyboard shortcuts: arrows nudge (Shift = 10px), Delete removes,
   // Ctrl+D duplicates, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo.
+  // Suppressed while a modal (bg editor, first-run wizard) is open — the
+  // modal owns keyboard focus and any Delete/Ctrl+Z hitting through to the
+  // underlying layout would silently destroy work.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Any modal open? Editor / wizard block the whole shortcut set.
+      if (document.querySelector('.bg-editor-backdrop, .wizard-backdrop')) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
       const k = e.key.toLowerCase()
@@ -359,27 +437,29 @@ export default function App() {
       <FirstRunWizard backend={backend} />
       <header>
         <div className="brand">
-          <span className="logo"><MonitorCog size={15} strokeWidth={2.2} /></span>
           <b>Trofeo Vision <small>STUDIO</small></b>
+          <span className="ver">v{pkg.version}</span>
         </div>
         <span className={`pill ${backend.link}`}>
-          <span className="dot" />Backend {backend.link === 'open' ? 'online' : backend.link}
+          <span className="dot" />{backend.link === 'open' ? t('backend.online')
+            : backend.link === 'connecting' ? t('backend.connecting')
+            : t('backend.closed')}
         </span>
         <span className={`pill ${backend.device === 'connected' ? 'open' : 'closed'}`}>
-          <span className="dot" />LCD {backend.device}
+          <span className="dot" />{backend.device === 'connected' ? t('lcd.connected') : t('lcd.notFound')}
         </span>
         <div className="head-right">
           <span className="fpsinfo">
-            target <b>{targetFps} fps</b> ({bgFps ? 'animated bg' : 'static'})
-            {measuredFps > 0 && streaming && <> · out <b>{measuredFps} fps</b></>}
+            {t('header.target')} <b>{targetFps} fps</b> ({bgFps ? t('header.animatedBg') : t('header.staticBg')})
+            {measuredFps > 0 && streaming && <> · {t('header.out')} <b>{measuredFps} fps</b></>}
           </span>
-          <label className="fpsmax">Max fps
+          <label className="fpsmax">{t('header.maxFps')}
             <select value={String(maxFps)} onChange={(e) => {
               const next = e.target.value === 'auto' ? 'auto' as const : +e.target.value
               setMaxFps(next)
               localStorage.setItem('lcd-maxfps', String(next))
             }}>
-              <option value="auto">Auto</option>
+              <option value="auto">{t('header.auto')}</option>
               {[5, 10, 15, 20, 30, 60].map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
@@ -389,8 +469,9 @@ export default function App() {
             <input type="checkbox" checked={streaming}
               onChange={(e) => setStreaming(e.target.checked)} />
             <span className="track" />
-            Stream
+            {t('header.stream')}
           </label>
+          <LangToggle />
           <UpdateBell />
         </div>
       </header>
@@ -398,10 +479,12 @@ export default function App() {
       <div className="body">
         <main>
           <div className="device">
-            <div className="canvas-wrap" ref={wrapRef} style={{ height: PANEL_H * scale }}>
+            <div className="canvas-wrap" ref={wrapRef} style={{ height: logicalH * scale, width: isPortrait ? logicalW * scale : undefined, margin: isPortrait ? '0 auto' : undefined }}>
               <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
                 <DashboardStage
                   ref={stageRef}
+                  logicalW={logicalW}
+                  logicalH={logicalH}
                   layout={layout}
                   sensors={displaySensors}
                   now={now}
@@ -419,74 +502,111 @@ export default function App() {
               </div>
             </div>
           </div>
-          <SensorReadout backend={backend} />
-        </main>
 
-        <aside>
+          <div className="inspector">
           <section>
-            <h3><Zap size={13} />Add widget</h3>
+            <h3><Zap size={13} />{t('section.addWidget')}</h3>
             <WidgetPalette newId={newId} onAdd={addWidget} />
           </section>
 
           <section>
-            <h3><Palette size={13} />Background</h3>
-            <label className="row"><span className="lbl">Color</span>
+            <h3><Palette size={13} />{t('section.background')}</h3>
+            <label className="row"><span className="lbl">{t('bg.color')}</span>
               <input type="color" value={layout.bgColor}
                 onChange={(e) => commit((l) => ({ ...l, bgColor: e.target.value }))} />
             </label>
             <div className="row">
-              <label className="filebtn"><Upload size={13} />Set image / GIF
-                <input type="file" accept="image/*" hidden onChange={async (e) => {
+              <label className="filebtn"><Upload size={13} />{t('bg.setMedia')}
+                <input type="file" accept="image/*,video/*" hidden onChange={async (e) => {
                   const f = e.target.files?.[0]; if (!f) return
-                  const src = await fileToDataUrl(f)
-                  // media goes to IndexedDB (localStorage can't hold a GIF)
-                  await saveBgMedia(src)
-                  commit((l) => ({ ...l, bgImage: IDB_BG }))
+                  // `#<epoch>` forces useAnimatedImage to re-run its effect
+                  // even when the previous bgImage was the same sentinel type
+                  // (React deps compare with Object.is on the string).
+                  const stamp = `#${Date.now()}`
+                  if (f.type.startsWith('video/')) {
+                    await saveBgVideo(f)
+                    commit((l) => ({
+                      ...l, bgImage: IDB_BG_VIDEO + stamp,
+                      // Reset transforms so the editor opens against a clean slate.
+                      bgOffsetX: 0, bgOffsetY: 0, bgScale: 1, bgRotate: 0,
+                      bgFlipX: false, bgFlipY: false,
+                      bgCropT: 0, bgCropR: 0, bgCropB: 0, bgCropL: 0,
+                    }))
+                  } else {
+                    const src = await fileToDataUrl(f)
+                    await saveBgMedia(src)
+                    commit((l) => ({
+                      ...l, bgImage: IDB_BG + stamp,
+                      bgOffsetX: 0, bgOffsetY: 0, bgScale: 1, bgRotate: 0,
+                      bgFlipX: false, bgFlipY: false,
+                      bgCropT: 0, bgCropR: 0, bgCropB: 0, bgCropL: 0,
+                    }))
+                  }
+                  // Allow re-selecting the same file later, and open the editor
+                  // once the frame is decoded (useAnimatedImage populates bgEl
+                  // asynchronously — the modal render gate handles the wait).
+                  e.target.value = ''
+                  setBgEditorOpen(true)
                 }} />
               </label>
               {layout.bgImage && (
-                // media stays in IndexedDB (overwritten on next Set) so that
-                // undoing the clear brings the background back intact
                 <button onClick={() => commit((l) => ({ ...l, bgImage: null }))}>
-                  Clear
+                  {t('bg.clear')}
                 </button>
               )}
             </div>
-            <label className="row"><span className="lbl">Dim</span>
-              <input type="range" min={0} max={0.8} step={0.05} value={layout.bgDim ?? 0}
-                onChange={(e) => commit((l) => ({ ...l, bgDim: +e.target.value }))} />
-              <span className="val">{Math.round((layout.bgDim ?? 0) * 100)}%</span>
-            </label>
-            <label className="row"><span className="lbl">Blur</span>
-              <input type="range" min={0} max={40} step={1} value={layout.bgBlur ?? 0}
-                onChange={(e) => commit((l) => ({ ...l, bgBlur: +e.target.value }))} />
-              <span className="val">{layout.bgBlur ?? 0}px</span>
-            </label>
-            <label className="row"><span className="lbl">Rotate output 180°</span>
-              <input type="checkbox" checked={rotate180}
-                onChange={(e) => commit((l) => ({ ...l, rotate180: e.target.checked }))} />
+
+            {layout.bgImage && (
+              <>
+                <button
+                  className="wide bg-edit-btn"
+                  onClick={() => setBgEditorOpen(true)}
+                  disabled={!bgEl}
+                >
+                  {t('bg.editPreview')}
+                </button>
+                <label className="row"><span className="lbl">{t('bg.dim')}</span>
+                  <input type="range" min={0} max={0.8} step={0.05} value={layout.bgDim ?? 0}
+                    onChange={(e) => commit((l) => ({ ...l, bgDim: +e.target.value }))} />
+                  <span className="val">{Math.round((layout.bgDim ?? 0) * 100)}%</span>
+                </label>
+                <label className="row"><span className="lbl">{t('bg.blur')}</span>
+                  <input type="range" min={0} max={40} step={1} value={layout.bgBlur ?? 0}
+                    onChange={(e) => commit((l) => ({ ...l, bgBlur: +e.target.value }))} />
+                  <span className="val">{layout.bgBlur ?? 0}px</span>
+                </label>
+              </>
+            )}
+
+            <label className="row"><span className="lbl">{t('bg.panelRotate')}</span>
+              <select value={panelRotate} onChange={(e) => {
+                const v = +e.target.value as 0 | 90 | 180 | 270
+                commit((l) => ({ ...l, panelRotate: v, rotate180: v === 180 }))
+              }}>
+                <option value={0}>0°</option>
+                <option value={90}>90° ({t('bg.portrait')})</option>
+                <option value={180}>180°</option>
+                <option value={270}>270° ({t('bg.portrait')})</option>
+              </select>
             </label>
           </section>
 
           <section>
-            <h3><MonitorCog size={13} />LCD Adjust</h3>
-            <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>
-              パネルが暗く感じるとき: コントラストと彩度を少し上げると
-              中間トーンが締まって見えます(ピーク輝度はハード側で頭打ち)
-            </p>
-            <label className="row"><span className="lbl">Contrast</span>
+            <h3><MonitorCog size={13} />{t('section.lcdAdjust')}</h3>
+            <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>{t('lcd.hint')}</p>
+            <label className="row"><span className="lbl">{t('lcd.contrast')}</span>
               <input type="range" min={0.7} max={1.6} step={0.05}
                 value={layout.lcdContrast ?? 1}
                 onChange={(e) => commit((l) => ({ ...l, lcdContrast: +e.target.value }))} />
               <span className="val">{(layout.lcdContrast ?? 1).toFixed(2)}</span>
             </label>
-            <label className="row"><span className="lbl">Saturation</span>
+            <label className="row"><span className="lbl">{t('lcd.saturation')}</span>
               <input type="range" min={0.7} max={1.6} step={0.05}
                 value={layout.lcdSaturation ?? 1}
                 onChange={(e) => commit((l) => ({ ...l, lcdSaturation: +e.target.value }))} />
               <span className="val">{(layout.lcdSaturation ?? 1).toFixed(2)}</span>
             </label>
-            <label className="row"><span className="lbl">Brightness</span>
+            <label className="row"><span className="lbl">{t('lcd.brightness')}</span>
               <input type="range" min={0.7} max={1.6} step={0.05}
                 value={layout.lcdBrightness ?? 1}
                 onChange={(e) => commit((l) => ({ ...l, lcdBrightness: +e.target.value }))} />
@@ -495,13 +615,13 @@ export default function App() {
             <div className="row">
               <button onClick={() => commit((l) => ({
                 ...l, lcdContrast: 1, lcdSaturation: 1, lcdBrightness: 1,
-              }))}>Reset</button>
+              }))}>{t('lcd.reset')}</button>
             </div>
           </section>
 
           <section>
-            <h3><Bell size={13} />Notifications</h3>
-            <label className="row"><span className="lbl">Show on LCD</span>
+            <h3><Bell size={13} />{t('section.notifications')}</h3>
+            <label className="row"><span className="lbl">{t('notify.show')}</span>
               <input type="checkbox" checked={notifyEnabled}
                 onChange={(e) => {
                   setNotifyEnabled(e.target.checked)
@@ -509,47 +629,39 @@ export default function App() {
                 }} />
             </label>
             {backend.notifyStatus === 'denied' && (
-              <p className="muted">
-                Windowsの設定 → プライバシーとセキュリティ → 通知 →
-                「アプリからの通知へのアクセス」を許可してください
-              </p>
+              <p className="muted">{t('notify.denied')}</p>
             )}
             {backend.notifyStatus.startsWith('unsupported') && (
-              <p className="muted">この環境では通知の取得がサポートされていません</p>
+              <p className="muted">{t('notify.unsupported')}</p>
             )}
             <button onClick={() => pushToast({
               id: -Date.now(), app: 'Trofeo Vision Studio',
-              title: 'テスト通知', body: 'ゲーム中でもここに通知が表示されます',
-            })}>Test toast</button>
+              title: t('notify.testTitle'), body: t('notify.testBody'),
+            })}>{t('notify.test')}</button>
           </section>
 
           <section>
-            <h3><MousePointerClick size={13} />Selection
+            <h3><MousePointerClick size={13} />{t('section.selection')}
               {selected && <span className="tag">{selected.type}</span>}
             </h3>
             {!selected && (
-              <p className="muted">
-                キャンバスのウィジェットをクリックで選択<br />
-                矢印キー: 移動 (Shift=10px) · Del: 削除<br />
-                Ctrl+D: 複製 · Ctrl+Z/Y: 元に戻す/やり直し<br />
-                Alt+ドラッグ: スナップ無効
-              </p>
+              <p className="muted" style={{ whiteSpace: 'pre-line' }}>{t('selection.hint')}</p>
             )}
             {selected && (
               <>
                 <div className="row">
-                  <button onClick={duplicate}><Copy size={13} />Copy</button>
-                  <button onClick={() => reorder('front')}><BringToFront size={13} />Front</button>
-                  <button onClick={() => reorder('back')}><SendToBack size={13} />Back</button>
+                  <button onClick={duplicate}><Copy size={13} />{t('selection.copy')}</button>
+                  <button onClick={() => reorder('front')}><BringToFront size={13} />{t('selection.front')}</button>
+                  <button onClick={() => reorder('back')}><SendToBack size={13} />{t('selection.back')}</button>
                 </div>
                 <WidgetProps w={selected} update={update} onDelete={del} />
                 {selected.type === 'visualizer' && (
                   vizError ? (
                     <p className="muted">
-                      ⚠ 音声キャプチャ失敗(15秒ごとに再試行中): {vizError.slice(0, 160)}
+                      {t('selection.vizError')} {vizError.slice(0, 160)}
                     </p>
                   ) : spectrum == null ? (
-                    <p className="muted">音声キャプチャを開始しています…</p>
+                    <p className="muted">{t('selection.vizStarting')}</p>
                   ) : null
                 )}
               </>
@@ -557,7 +669,7 @@ export default function App() {
           </section>
 
           <section>
-            <h3><Layers size={13} />Layers <span className="tag">{layout.widgets.length}</span></h3>
+            <h3><Layers size={13} />{t('section.layers')} <span className="tag">{layout.widgets.length}</span></h3>
             <LayerPanel
               widgets={layout.widgets}
               selectedId={selectedId}
@@ -569,7 +681,7 @@ export default function App() {
           </section>
 
           <section>
-            <h3><Bookmark size={13} />Presets</h3>
+            <h3><Bookmark size={13} />{t('section.presets')}</h3>
             <Presets layout={layout} onLoad={(l) => { commit(() => l); setSelectedId(null) }} />
           </section>
 
@@ -578,11 +690,22 @@ export default function App() {
               commit(() => defaultLayout()) // bg media kept in IDB so undo restores it
               setSelectedId(null)
             }}>
-              <RotateCcw size={13} />Reset layout
+              <RotateCcw size={13} />{t('reset.layout')}
             </button>
           </section>
-        </aside>
+          </div>
+        </main>
       </div>
+      {bgEditorOpen && bgEl && (
+        <BgEditorModal
+          layout={layout}
+          bgEl={bgEl}
+          logicalW={logicalW}
+          logicalH={logicalH}
+          onCommit={(patch) => commit((l) => ({ ...l, ...patch }))}
+          onClose={() => setBgEditorOpen(false)}
+        />
+      )}
     </div>
   )
 }

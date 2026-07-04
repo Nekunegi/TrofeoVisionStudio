@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useRef, useState } from 'react'
 import {
   Stage, Layer, Rect, Text, Group, Line, Circle, Shape,
-  Image as KImage, Transformer,
+  Transformer,
 } from 'react-konva'
 import type Konva from 'konva'
 import {
@@ -337,6 +337,10 @@ interface Props {
   // Fired when the user resizes via the transformer handles: scale factors the
   // widget should absorb into its own size fields, plus the (possibly moved) origin.
   onResize?: (id: string, sx: number, sy: number, x: number, y: number) => void
+  // Logical panel dims — default landscape (1920x480) but the caller can pass
+  // portrait (480x1920) when the physical panel is mounted rotated 90/270°.
+  logicalW?: number
+  logicalH?: number
 }
 
 // Text-like widgets scale uniformly (fontSize); box-like ones resize freely.
@@ -353,7 +357,8 @@ const SNAP_PX = 8
 
 const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
   { layout, sensors, now, history, toasts = [], bgEl, media = null, spectrum = null,
-    editable = false, selectedId, onSelect, onMove, onResize }, ref,
+    editable = false, selectedId, onSelect, onMove, onResize,
+    logicalW = PANEL_W, logicalH = PANEL_H }, ref,
 ) {
   const trRef = useRef<Konva.Transformer>(null)
   const groupRefs = useRef(new Map<string, Konva.Group>())
@@ -365,6 +370,8 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
     color: layout.bgColor,
     blur: layout.bgBlur ?? 0,
     dim: layout.bgDim ?? 0,
+    panelW: logicalW,
+    panelH: logicalH,
   }
 
   const snapDragMove = (id: string, e: Konva.KonvaEventObject<DragEvent>) => {
@@ -373,8 +380,8 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
     const node = e.target
     const skip = { skipShadow: true, skipStroke: true }
     const r = node.getClientRect(skip)
-    const vTargets = [0, PANEL_W / 2, PANEL_W]
-    const hTargets = [0, PANEL_H / 2, PANEL_H]
+    const vTargets = [0, logicalW / 2, logicalW]
+    const hTargets = [0, logicalH / 2, logicalH]
     for (const other of layout.widgets) {
       if (other.id === id) continue
       const g = groupRefs.current.get(other.id)
@@ -420,31 +427,64 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
   return (
     <Stage
       ref={ref}
-      width={PANEL_W}
-      height={PANEL_H}
+      width={logicalW}
+      height={logicalH}
       onMouseDown={(e) => {
         if (editable && e.target === e.target.getStage()) onSelect?.(null)
       }}
     >
       <Layer>
-        <Rect width={PANEL_W} height={PANEL_H} fill={layout.bgColor} />
-        {bgEl && ((layout.bgBlur ?? 0) > 0 ? (
-          // Canvas 2D filter blur (GPU-backed in Chromium). Drawn oversized so
-          // blur sampling past the edges never shows transparent fringes.
+        <Rect width={logicalW} height={logicalH} fill={layout.bgColor} />
+        {bgEl && (
           <Shape sceneFunc={(ctx) => {
             const blur = layout.bgBlur ?? 0
-            const pad = blur * 2
+            const scale = layout.bgScale ?? 1
+            const rot = ((layout.bgRotate ?? 0) * Math.PI) / 180
+            const flipX = layout.bgFlipX ? -1 : 1
+            const flipY = layout.bgFlipY ? -1 : 1
+            const offX = ((layout.bgOffsetX ?? 0) / 100) * logicalW
+            const offY = ((layout.bgOffsetY ?? 0) / 100) * logicalH
+
+            // Intrinsic source size — HTMLImageElement uses naturalWidth/Height;
+            // canvases and video-frame canvases just use width/height.
+            const anyEl = bgEl as { naturalWidth?: number; naturalHeight?: number; width: number; height: number }
+            const srcWFull = anyEl.naturalWidth || anyEl.width
+            const srcHFull = anyEl.naturalHeight || anyEl.height
+            // Crop insets (%). Clamp so we always have at least a 10% window.
+            const cT = Math.min(90, Math.max(0, layout.bgCropT ?? 0))
+            const cR = Math.min(90, Math.max(0, layout.bgCropR ?? 0))
+            const cB = Math.min(90, Math.max(0, layout.bgCropB ?? 0))
+            const cL = Math.min(90, Math.max(0, layout.bgCropL ?? 0))
+            const sX = (cL / 100) * srcWFull
+            const sY = (cT / 100) * srcHFull
+            const srcW = srcWFull * (1 - (cL + cR) / 100)
+            const srcH = srcHFull * (1 - (cT + cB) / 100)
+            // "cover the panel" base fit; user's bgScale multiplies on top.
+            const baseFit = Math.max(logicalW / srcW, logicalH / srcH)
+            const drawW = srcW * baseFit * scale
+            const drawH = srcH * baseFit * scale
+
             const c2 = ctx._context
             c2.save()
-            c2.filter = `blur(${blur}px)`
-            c2.drawImage(bgEl, -pad, -pad, PANEL_W + pad * 2, PANEL_H + pad * 2)
+            // Clip to panel so rotation/zoom overflow doesn't leak into the
+            // stage bounds where widgets live.
+            c2.beginPath()
+            c2.rect(0, 0, logicalW, logicalH)
+            c2.clip()
+            if (blur > 0) c2.filter = `blur(${blur}px)`
+            c2.translate(logicalW / 2 + offX, logicalH / 2 + offY)
+            c2.rotate(rot)
+            c2.scale(flipX, flipY)
+            if (sX || sY || srcW !== srcWFull || srcH !== srcHFull) {
+              c2.drawImage(bgEl, sX, sY, srcW, srcH, -drawW / 2, -drawH / 2, drawW, drawH)
+            } else {
+              c2.drawImage(bgEl, -drawW / 2, -drawH / 2, drawW, drawH)
+            }
             c2.restore()
           }} />
-        ) : (
-          <KImage image={bgEl} width={PANEL_W} height={PANEL_H} />
-        ))}
+        )}
         {bgEl && (layout.bgDim ?? 0) > 0 && (
-          <Rect width={PANEL_W} height={PANEL_H} fill="#000"
+          <Rect width={logicalW} height={logicalH} fill="#000"
             opacity={Math.min(0.9, layout.bgDim ?? 0)} />
         )}
         {layout.widgets.map((w) => {
@@ -478,16 +518,16 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
             </Group>
           )
         })}
-        {toasts.map((t, i) => <ToastCard key={t.id} t={t} index={i} bg={bgEnv} />)}
+        {toasts.map((t, i) => <ToastCard key={t.id} t={t} index={i} bg={bgEnv} panelW={logicalW} />)}
       </Layer>
       {editable && (
         <Layer>
           {guides.v.map((x) => (
-            <Line key={`v${x}`} points={[x, 0, x, PANEL_H]}
+            <Line key={`v${x}`} points={[x, 0, x, logicalH]}
               stroke="#ff4dd2" strokeWidth={1.5} dash={[6, 6]} listening={false} />
           ))}
           {guides.h.map((y) => (
-            <Line key={`h${y}`} points={[0, y, PANEL_W, y]}
+            <Line key={`h${y}`} points={[0, y, logicalW, y]}
               stroke="#ff4dd2" strokeWidth={1.5} dash={[6, 6]} listening={false} />
           ))}
           <Transformer

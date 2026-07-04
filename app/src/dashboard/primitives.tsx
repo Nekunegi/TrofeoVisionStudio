@@ -1,5 +1,5 @@
 import { Rect, Circle, Shape, Image as KImage } from 'react-konva'
-import { PANEL_W, PANEL_H, type Widget } from '../types'
+import { type Widget } from '../types'
 import { srcSize, useImage, type BgEnv } from './theme'
 
 export function WidgetImage({ w }: { w: Extract<Widget, { type: 'image' }> }) {
@@ -38,8 +38,8 @@ export function GlassPanel({ x = 0, y = 0, w, h, radius = 0, circle = false, blu
           const { w: iw, h: ih } = srcSize(bg.el)
           c2.filter = `blur(${bpx}px)`
           c2.drawImage(bg.el,
-            (ox + x - pad) * (iw / PANEL_W), (oy + y - pad) * (ih / PANEL_H),
-            (w + pad * 2) * (iw / PANEL_W), (h + pad * 2) * (ih / PANEL_H),
+            (ox + x - pad) * (iw / bg.panelW), (oy + y - pad) * (ih / bg.panelH),
+            (w + pad * 2) * (iw / bg.panelW), (h + pad * 2) * (ih / bg.panelH),
             x - pad, y - pad, w + pad * 2, h + pad * 2)
           c2.filter = 'none'
         }

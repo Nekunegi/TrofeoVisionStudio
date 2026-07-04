@@ -170,12 +170,30 @@ export interface MediaState {
 export interface Layout {
   v?: number // layout schema/design version — bump LAYOUT_VERSION to retire stale saved layouts
   bgColor: string
-  bgImage: string | null // data URL
+  bgImage: string | null // data URL or IDB sentinel ('idb:bg' / 'idb:bg-video')
   // The panel is mounted upside-down in the case — outgoing frames are rotated
   // 180° (editor view stays upright). Undefined means true (the common mounting).
   rotate180?: boolean
+  // Physical panel orientation on the case: 0/90/180/270°. Rotation is applied
+  // to the outgoing frame only (editor stays in native 1920x480). If set,
+  // takes precedence over rotate180.
+  panelRotate?: 0 | 90 | 180 | 270
   bgDim?: number  // 0..1 black overlay over the background (default 0)
   bgBlur?: number // px gaussian blur on the background image (default 0)
+  // Background media transform — applied when painting the bgImage/video onto
+  // the panel. Zoom / offset / rotation / flip / crop. All optional and default
+  // to a "cover the panel" fit (scale=1 at that fit).
+  bgScale?: number      // 0.1..4, default 1
+  bgOffsetX?: number    // %, default 0 (0 = centered)
+  bgOffsetY?: number    // %, default 0
+  bgRotate?: number     // deg, 0..359, default 0
+  bgFlipX?: boolean
+  bgFlipY?: boolean
+  // Crop insets — % of the source image trimmed from each edge (0..90).
+  bgCropT?: number
+  bgCropR?: number
+  bgCropB?: number
+  bgCropL?: number
   // LCD compensation: canvas ctx.filter multipliers applied to the outgoing
   // frame. 1.0 = neutral. The physical panel is fairly dim; boosting contrast
   // and saturation makes midtones read punchier (the peak brightness itself is

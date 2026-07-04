@@ -16,6 +16,11 @@
   --warn: #ffc861;
   --err: #ff7a8a;
   --radius: 14px;
+  /* Aliases so newer components can use conventional names without touching
+   * the older var vocabulary (--sub, --text, --bg-2 stay canonical). */
+  --muted: var(--sub);
+  --fg: var(--text);
+  --panel: var(--bg-2);
 }
 
 * { box-sizing: border-box; }
@@ -66,6 +71,17 @@ header {
   color: var(--faint);
   font-size: 11px;
   margin-left: 2px;
+}
+.brand .ver {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .pill {
@@ -169,11 +185,11 @@ header {
 
 main {
   flex: 1;
-  padding: 22px;
+  padding: 18px 20px 22px;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -187,83 +203,163 @@ main {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
 }
 .canvas-wrap {
+  position: relative;
   width: 100%;
   background: #000;
   border-radius: 13px;
   overflow: hidden;
 }
 
-/* sensor readout strip */
-.readout {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.scell {
-  background: var(--bg-2);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  padding: 9px 16px 8px;
-  min-width: 112px;
-  transition: border-color 0.15s, transform 0.15s;
-}
-.scell:hover { border-color: rgba(77, 225, 255, 0.3); transform: translateY(-1px); }
-.scell span {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--faint);
-  margin-bottom: 2px;
-}
-.scell b {
-  font-size: 19px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.scell b i {
-  font-style: normal;
+/* Bg edit trigger button in the sidebar. */
+.bg-edit-btn { margin-top: 4px; }
+
+/* Preset button strip (zoom / rotate presets in the bg editor modal). */
+.zoom-presets { gap: 5px; }
+.zoom-presets button {
+  flex: 1;
+  padding: 4px 6px;
   font-size: 11px;
-  font-weight: 500;
-  color: var(--sub);
-  margin-left: 2px;
-}
-.scell.err {
-  color: var(--err);
-  font-size: 12px;
-  align-self: center;
-  border-color: rgba(255, 122, 138, 0.25);
 }
 
-/* ----------------------------------------------------------------- sidebar */
+/* Chip-style pill button used for flip toggles and reset in bg editor. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.chip input { margin: 0; accent-color: var(--accent); }
 
-aside {
-  width: 312px;
-  flex: none;
-  background: var(--bg-2);
-  border-left: 1px solid var(--line);
-  padding: 18px 16px;
-  overflow: auto;
+/* ------------------------------------------------ background editor modal */
+.bg-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  animation: fadeIn 160ms ease-out;
+}
+.bg-editor {
+  width: min(920px, 92vw);
+  height: min(760px, 92vh);
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 12px;
+  padding: 18px;
+  background: rgba(20, 22, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  animation: fadeUp 180ms ease-out;
+}
+.bg-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.bg-editor-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.bg-editor-close {
+  margin-left: auto;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.bg-editor-close:hover { background: rgba(255, 255, 255, 0.05); color: var(--fg); }
+.bg-editor-canvas-wrap {
+  position: relative;
+  min-height: 0;
+  border-radius: 10px;
+  background: repeating-conic-gradient(#111 0% 25%, #191b26 0% 50%) 50% 50% / 20px 20px;
+  overflow: hidden;
+}
+.bg-editor-canvas-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.bg-editor-canvas-wrap canvas:active { cursor: grabbing; }
+.bg-editor-controls {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+.bg-editor-controls .row { display: flex; gap: 8px; align-items: center; }
+.bg-editor-controls .lbl { min-width: 60px; color: var(--sub); font-size: 11px; }
+.bg-editor-controls input[type="range"] { flex: 1; }
+.bg-editor-controls .val { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted); }
+.bg-editor-controls .chip.on {
+  background: rgba(255, 200, 97, 0.14);
+  border-color: rgba(255, 200, 97, 0.4);
+  color: #ffd884;
+}
+.bg-editor-foot {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.bg-editor-foot button {
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+.bg-editor-ok {
+  background: linear-gradient(180deg, rgba(255, 200, 97, 0.22), rgba(255, 200, 97, 0.1));
+  border-color: rgba(255, 200, 97, 0.5);
+  color: #ffd884;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.bg-editor-ok:hover { filter: brightness(1.15); }
+
+/* ------------------------------------------------- inspector (below LCD) */
+
+.inspector {
+  column-width: 260px;
+  column-gap: 12px;
 }
 
-aside section {
+.inspector section {
   background: var(--bg-3);
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  padding: 14px 15px;
+  border-radius: 14px;
+  padding: 12px 13px;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   animation: fadeUp 0.3s ease both;
+  min-width: 0;
+  break-inside: avoid;
+  margin-bottom: 12px;
+  display: block;
 }
 /* gentle stagger on load */
-aside section:nth-child(2) { animation-delay: 0.04s; }
-aside section:nth-child(3) { animation-delay: 0.08s; }
-aside section:nth-child(4) { animation-delay: 0.12s; }
-aside section:nth-child(5) { animation-delay: 0.16s; }
-aside section:nth-child(6) { animation-delay: 0.2s; }
+.inspector section:nth-child(2) { animation-delay: 0.04s; }
+.inspector section:nth-child(3) { animation-delay: 0.08s; }
+.inspector section:nth-child(4) { animation-delay: 0.12s; }
+.inspector section:nth-child(5) { animation-delay: 0.16s; }
+.inspector section:nth-child(6) { animation-delay: 0.2s; }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -429,8 +525,8 @@ aside section:nth-child(6) { animation-delay: 0.2s; }
 }
 .wizard-tips a { color: var(--accent); }
 .wizard-foot button.wide { width: 100%; padding: 10px; font-weight: 600; }
-aside h3 {
-  margin: 0 0 11px;
+.inspector h3 {
+  margin: 0 0 10px;
   font-size: 10.5px;
   font-weight: 600;
   color: var(--sub);
@@ -440,8 +536,8 @@ aside h3 {
   align-items: center;
   gap: 7px;
 }
-aside h3 svg { color: var(--accent); opacity: 0.8; }
-aside h3 .tag {
+.inspector h3 svg { color: var(--accent); opacity: 0.8; }
+.inspector h3 .tag {
   margin-left: auto;
   text-transform: none;
   letter-spacing: 0;
@@ -501,8 +597,12 @@ aside h3 .tag {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 10px 2px 8px;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 4px;
+  min-height: 58px;
+  line-height: 1.1;
+  text-align: center;
   background: var(--bg-input);
   color: var(--sub);
   border: 1px solid var(--line-soft);
@@ -521,7 +621,7 @@ aside h3 .tag {
 }
 .wbtn:active { transform: translateY(0) scale(0.95); }
 .wbtn:hover svg { color: var(--accent); }
-.wbtn svg { transition: color 0.12s; }
+.wbtn svg { display: block; transition: color 0.12s; }
 
 /* generic controls */
 button, .filebtn {
@@ -638,6 +738,31 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
 }
 ::-webkit-scrollbar-thumb:hover { background: #333b52; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------------------------------------- language toggle (header, right) */
+.lang-toggle {
+  display: inline-flex;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+.lang-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.lang-toggle button:hover { background: rgba(255, 255, 255, 0.05); color: var(--fg); }
+.lang-toggle button.on {
+  background: rgba(77, 225, 255, 0.14);
+  color: var(--accent);
+}
 
 /* -------------------------------------------- update bell (header, right) */
 .bell-wrap { position: relative; }

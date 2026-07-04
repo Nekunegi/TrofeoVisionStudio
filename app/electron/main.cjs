@@ -2,7 +2,7 @@
 // keeps streaming to the LCD while minimized to the tray (headless resident mode).
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, protocol, net, session, desktopCapturer,
-  Notification, ipcMain,
+  Notification, ipcMain, shell,
 } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
@@ -116,8 +116,10 @@ function startBackend() {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280,
-    height: 640,
+    width: 1100,
+    height: 900,
+    minWidth: 720,
+    minHeight: 640,
     backgroundColor: '#0e0e13',
     title: 'Trofeo Vision Studio',
     // Logon autostart (--hidden) starts tray-only; streaming still runs because
@@ -137,8 +139,16 @@ function createWindow() {
   })
 
   // Block the renderer from opening arbitrary external windows / navigating
-  // away from the app bundle. Everything legitimate is loaded internally.
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // away from the app bundle. Legitimate outbound HTTPS links (README,
+  // troubleshooting docs) are routed to the OS default browser instead.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) {
+      shell.openExternal(url).catch((e) => console.warn('[electron] openExternal failed:', e.message))
+    } else {
+      console.warn('[electron] denied window.open to', url)
+    }
+    return { action: 'deny' }
+  })
   win.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith(DEV_URL) && !url.startsWith('app://')) {
       e.preventDefault()
@@ -430,6 +440,12 @@ function installCsp() {
     "connect-src 'self' app: data: ws://127.0.0.1:* ws://localhost:* https://api.open-meteo.com https://geocoding-api.open-meteo.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
+    // Defense in depth: no <object>/<embed>, no cross-origin iframes, no form
+    // submits leaving the app, no service workers loaded from anywhere else.
+    "object-src 'none'",
+    "frame-src 'none'",
+    "form-action 'none'",
+    "worker-src 'self'",
   ].join('; ')
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -492,7 +508,13 @@ app.on('before-quit', async (e) => {
         const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8))
         const buf = await blob.arrayBuffer()
         await new Promise((resolve) => {
-          const ws = new WebSocket(window.__backendUrl || 'ws://localhost:8787')
+          // The shutdown URL is validated here — a compromised renderer can
+          // rewrite window.__backendUrl to point elsewhere, so we only accept
+          // loopback WebSockets.
+          const raw = window.__backendUrl || 'ws://localhost:8787'
+          const url = /^wss?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/i.test(raw)
+            ? raw : 'ws://localhost:8787'
+          const ws = new WebSocket(url)
           ws.binaryType = 'arraybuffer'
           ws.onopen = () => { ws.send(buf); setTimeout(() => { ws.close(); resolve() }, 500) }
           ws.onerror = () => resolve()

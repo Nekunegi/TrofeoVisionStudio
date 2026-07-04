@@ -67,6 +67,10 @@ export interface BgEnv {
   color: string
   blur: number // layout-level bg blur (glass adds its own on top)
   dim: number  // layout-level bg dim
+  // Logical stage dimensions — GlassPanel uses these to sample the right
+  // region of the background image (portrait vs landscape differ).
+  panelW: number
+  panelH: number
 }
 
 export function srcSize(el: CanvasImageSource): { w: number; h: number } {

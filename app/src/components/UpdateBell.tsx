@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bell, BellRing, Loader2, AlertCircle, Check } from 'lucide-react'
+import { useT } from '../i18n'
 
 export type UpdaterState = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
 
@@ -27,6 +28,7 @@ const EMPTY: UpdaterStatus = {
 }
 
 export function UpdateBell() {
+  const t = useT()
   const [status, setStatus] = useState<UpdaterStatus>(EMPTY)
   const [open, setOpen] = useState(false)
 
@@ -41,12 +43,21 @@ export function UpdateBell() {
 
   useEffect(() => {
     if (!open) return
-    const close = (e: MouseEvent) => {
-      const t = e.target as HTMLElement
-      if (!t.closest('.bell-wrap')) setOpen(false)
+    const close = (e: Event) => {
+      const t = e.target as HTMLElement | null
+      if (!t?.closest?.('.bell-wrap')) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
     }
     document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
+    document.addEventListener('touchstart', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('touchstart', close)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   if (!window.updater) return null
@@ -63,11 +74,11 @@ export function UpdateBell() {
     : state === 'downloading' ? `${percent}%`
     : null
 
-  const title = state === 'ready' ? `v${version} をインストールできます`
-    : state === 'downloading' ? `v${version} をダウンロード中 (${percent}%)`
-    : state === 'checking' ? 'アップデート確認中…'
-    : state === 'error' ? `更新エラー: ${error ?? ''}`
-    : '最新版です'
+  const title = state === 'ready' ? `v${version} ${t('bell.tipReady')}`
+    : state === 'downloading' ? `v${version} ${t('bell.tipDownloading')} (${percent}%)`
+    : state === 'checking' ? t('bell.tipChecking')
+    : state === 'error' ? `${t('bell.tipError')} ${error ?? ''}`
+    : t('bell.tipIdle')
 
   const install = async () => {
     if (state !== 'ready') return
@@ -95,51 +106,49 @@ export function UpdateBell() {
       {open && (
         <div className="bell-popover" role="dialog">
           <div className="bell-current">
-            現在のバージョン: <b>v{current ?? '?'}</b>
+            {t('bell.current')}: <b>v{current ?? '?'}</b>
           </div>
           {state === 'ready' && (
             <>
               <div className="bell-msg ok">
-                <Check size={14} /> 新しいバージョン <b>v{version}</b> が利用可能
+                <Check size={14} /> {t('bell.readyPrefix')} <b>v{version}</b> {t('bell.ready')}
               </div>
               <button type="button" className="bell-cta" onClick={install}>
-                インストールして再起動
+                {t('bell.install')}
               </button>
-              <div className="bell-note">
-                LCD への配信は再起動中に一時停止します
-              </div>
+              <div className="bell-note">{t('bell.installNote')}</div>
             </>
           )}
           {state === 'downloading' && (
             <>
               <div className="bell-msg">
-                <Loader2 size={14} className="spin" /> v{version} をダウンロード中
+                <Loader2 size={14} className="spin" /> v{version} {t('bell.downloading')}
               </div>
               <div className="bell-bar"><span style={{ width: `${percent}%` }} /></div>
-              <div className="bell-note">{percent}% 完了</div>
+              <div className="bell-note">{percent}{t('bell.percentDone')}</div>
             </>
           )}
           {state === 'checking' && (
             <div className="bell-msg">
-              <Loader2 size={14} className="spin" /> 確認中…
+              <Loader2 size={14} className="spin" /> {t('bell.checking')}
             </div>
           )}
           {state === 'idle' && (
             <>
-              <div className="bell-msg">最新版を使用中です</div>
+              <div className="bell-msg">{t('bell.upToDate')}</div>
               <button type="button" className="bell-check" onClick={check}>
-                今すぐ確認
+                {t('bell.checkNow')}
               </button>
             </>
           )}
           {state === 'error' && (
             <>
               <div className="bell-msg err">
-                <AlertCircle size={14} /> 更新チェックに失敗
+                <AlertCircle size={14} /> {t('bell.errorTitle')}
               </div>
               <div className="bell-err-detail">{error}</div>
               <button type="button" className="bell-check" onClick={check}>
-                再試行
+                {t('bell.retry')}
               </button>
             </>
           )}

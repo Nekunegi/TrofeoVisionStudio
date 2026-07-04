@@ -6,8 +6,12 @@ import { EMPTY_SENSORS, type MediaState, type Sensors } from './types'
 // the localStorage override beats the default port.
 const URL = new URLSearchParams(location.search).get('backend')
   ?? localStorage.getItem('backend-url') ?? 'ws://localhost:8787'
-// The Electron shutdown path sends its blanking frame to the same backend.
-;(window as unknown as { __backendUrl?: string }).__backendUrl = URL
+// The Electron shutdown path reads this to send the LCD-blanking frame. Only
+// publish it if it's a loopback WebSocket — otherwise a compromised renderer
+// could steer the quit-time upload to an attacker-controlled host.
+if (/^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(URL)) {
+  ;(window as unknown as { __backendUrl?: string }).__backendUrl = URL
+}
 
 export type LinkState = 'connecting' | 'open' | 'closed'
 
@@ -65,7 +69,12 @@ export function useBackend(): Backend {
       ws.onopen = () => setLink('open')
       ws.onmessage = (ev) => {
         if (typeof ev.data !== 'string') return
-        const msg = JSON.parse(ev.data)
+        // A malformed frame from any source (dev proxy, injected fuzzer,
+        // half-migrated backend) should not crash the whole handler.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let msg: any
+        try { msg = JSON.parse(ev.data) } catch { return }
+        if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return
         if (msg.type === 'sensors') setSensors(msg.data as Sensors)
         else if (msg.type === 'status') {
           setDevice(msg.device)
@@ -102,6 +111,14 @@ export function useBackend(): Backend {
         setDevice('unknown')
         setDeviceDetail('')
         setMedia(null) // now-playing state from the dead backend is stale
+        // Sensors, notify/spectrum status must also reset — otherwise the
+        // first-run wizard's "backend connection" light stays green (via CPU
+        // temp still showing a value) and the notify pill lies about the
+        // subscription being alive after the socket died.
+        setSensors(EMPTY_SENSORS)
+        setNotifyStatus('unknown')
+        setSpectrumStatus('unknown')
+        setSpectrumFrame(null)
         retry = setTimeout(connect, 1500)
       }
       ws.onerror = () => ws.close()
@@ -133,7 +150,10 @@ export function useBackend(): Backend {
   // Eyes-free debugging: inject a fake now-playing state from DEBUG_EVAL —
   // directly (__injectMedia) or via a one-shot localStorage key that survives
   // the seed-then-reload pattern ('debug-media').
+  // Dev-only surface — packaged prod builds must not leak a global sensor
+  // override, otherwise any XSS could spoof the streamed LCD content.
   useEffect(() => {
+    if (!import.meta.env.DEV) return
     const inject = (d: Partial<MediaState>) => setMedia({
       hasMedia: true, app: '', title: '', artist: '', album: '',
       playing: false, pos: 0, dur: 0, thumb: null,
@@ -153,6 +173,7 @@ export function useBackend(): Backend {
   // window.__injectSensors({cpuTemp: 52, gpuLoad: 78, ...}) or a one-shot
   // 'debug-sensors' localStorage key that survives a location.reload().
   useEffect(() => {
+    if (!import.meta.env.DEV) return
     const inject = (d: Partial<Sensors>) =>
       setSensors((prev) => ({ ...prev, ...d } as Sensors))
     ;(window as unknown as { __injectSensors?: typeof inject }).__injectSensors = inject

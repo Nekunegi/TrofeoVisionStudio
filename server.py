@@ -299,20 +299,24 @@ async def handler(ws):
     async def report(status, detail=""):
         await ws.send(json.dumps({"type": "status", "device": status, "detail": detail}))
 
+    # Register the client BEFORE any potentially-throwing send so the
+    # finally block below always runs — otherwise a pre-loop send failure
+    # (client disconnected mid-handshake) leaves CLIENTS with a dead ref.
     CLIENTS.add(ws)
-    await ws.send(json.dumps({"type": "notifyStatus", "status": notifier.status}))
-    snap = media.snapshot()
-    if snap is not None:
-        await ws.send(json.dumps({"type": "media", "data": snap}))
+    sensor_task = None
     try:
-        await loop.run_in_executor(None, device.ensure)
-        await report("connected")
-    except Exception as e:
-        print(f"[device] connect failed: {e}", flush=True)
-        await report("disconnected", str(e))
+        await ws.send(json.dumps({"type": "notifyStatus", "status": notifier.status}))
+        snap = media.snapshot()
+        if snap is not None:
+            await ws.send(json.dumps({"type": "media", "data": snap}))
+        try:
+            await loop.run_in_executor(None, device.ensure)
+            await report("connected")
+        except Exception as e:
+            print(f"[device] connect failed: {e}", flush=True)
+            await report("disconnected", str(e))
 
-    sensor_task = asyncio.create_task(sensor_loop(ws))
-    try:
+        sensor_task = asyncio.create_task(sensor_loop(ws))
         dump_path = os.environ.get("TROFEO_DUMP")
         async for message in ws:
             if isinstance(message, bytes):
@@ -355,7 +359,14 @@ async def handler(ws):
     finally:
         CLIENTS.discard(ws)
         SPECTRUM_SUBS.pop(ws, None)
-        sensor_task.cancel()
+        if sensor_task is not None:
+            sensor_task.cancel()
+            # Wait so the executor-bound sensor read can't outlive us and
+            # try to send on a dead socket.
+            try:
+                await asyncio.wait_for(sensor_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
         print("client disconnected")
 
 

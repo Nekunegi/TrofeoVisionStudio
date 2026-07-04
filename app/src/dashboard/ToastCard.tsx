@@ -1,5 +1,4 @@
 import { Rect, Text, Group } from 'react-konva'
-import { PANEL_W } from '../types'
 import { TOAST_FONT, type BgEnv } from './theme'
 import { GlassPanel, PanelStroke } from './primitives'
 
@@ -18,7 +17,7 @@ const TOAST_GAP = 14
 const TOAST_IN_MS = 300
 const TOAST_OUT_MS = 280
 
-export function ToastCard({ t, index, bg }: { t: LcdToast; index: number; bg: BgEnv }) {
+export function ToastCard({ t, index, bg, panelW }: { t: LcdToast; index: number; bg: BgEnv; panelW: number }) {
   const nowMs = Date.now()
   const remaining = Math.max(0, Math.min(1, (t.until - nowMs) / t.total))
   const hasBody = !!t.body
@@ -28,7 +27,7 @@ export function ToastCard({ t, index, bg }: { t: LcdToast; index: number; bg: Bg
   const tout = Math.min(1, Math.max(0, t.until - nowMs) / TOAST_OUT_MS)
   const opacity = easeIn * tout
   const dx = (1 - easeIn) * 90 + (1 - tout) * 50
-  const ox = PANEL_W - TOAST_W - 20 + dx
+  const ox = panelW - TOAST_W - 20 + dx
   const oy = 20 + index * (TOAST_H + TOAST_GAP)
   return (
     <Group x={ox} y={oy} opacity={opacity} listening={false}>

@@ -6,6 +6,115 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-07-05
+
+### Added
+- **In-app background editor** (Instagram-style): opens automatically after
+  picking a file. Full-size source view with an aspect-locked crop rect,
+  four corner handles for zoom, rule-of-thirds guides, and rotation +
+  flip controls. Confirmed via Apply or dismissed with Cancel/Escape.
+- **Video background support**: .mp4/.webm/.mov can be set as the LCD
+  background alongside images and GIFs. Stored as Blob in IndexedDB
+  (avoiding the 33% base64 overhead), played through an off-screen
+  `<video>` element, and blitted to a double-buffered canvas so React
+  actually re-renders each frame.
+- **Panel rotation 0°/90°/180°/270°** (portrait mounting): the editor
+  stage swaps to a 480×1920 logical space and the outgoing frame is
+  rotated into the fixed 1920×480 hardware buffer.
+- **i18n JA / EN toggle** with per-user localStorage persistence. Covers
+  header, inspector sections, buttons, first-run wizard, update bell,
+  widget palette (search, empty state, category labels), layer panel,
+  and presets.
+- **In-app update bell** in the header: reflects the auto-updater
+  lifecycle live (checking / downloading with progress / ready to
+  install / error). One click on "Install and restart" replaces the
+  tray-menu-only path.
+- **First-run wizard**: pre-flight status check for backend / LCD / CPU
+  temperature / Windows notifications, with deep-links into
+  `docs/TROUBLESHOOTING.md` for anything red.
+- **Background transforms** (via the editor modal): rotation, flip X/Y,
+  aspect-locked crop.
+
+### Changed
+- **Inspector moved below the LCD preview** as a responsive multi-column
+  layout; the right-hand sidebar is gone. Window default now 1100×900
+  (was 1280×640) to match a taller stack.
+- **Sensor readout strip removed** — the LCD preview shows the values
+  directly through its widgets.
+- **Version pill in the header** shows the running `package.json`
+  version.
+- **CSS variable aliases** (`--muted`, `--fg`, `--panel`) added so
+  newer components stop referencing undefined custom properties.
+- Removed the earlier drag-on-preview overlay and 4-slider crop
+  diagram from the sidebar — both superseded by the editor modal.
+
+### Fixed
+- **Background swap regression**: choosing a new image when one was
+  already set left the previous pixels on the LCD. The `useAnimatedImage`
+  effect keyed on the `bgImage` sentinel string; two consecutive image
+  selections were both `idb:bg` so React saw no dep change and skipped
+  the effect. Sentinels now carry a `#<epoch>` suffix so every write
+  forces a real re-run — fix propagates to preset load and JSON import.
+- **Video path never re-rendered**: the runVideo loop reused a single
+  canvas ref, so `setFrame(canvas)` bailed on `Object.is` equality and
+  Konva painted a static frame. Now double-buffered like the GIF path.
+- **`vfcHandle` collision**: cleanup mixed `cancelVideoFrameCallback`
+  and `cancelAnimationFrame` on the same variable across
+  requestVideoFrameCallback and rAF fallback paths. Split into
+  `vfcHandle` and `vidRafHandle`.
+- **Streaming loop teardown thrash**: the interval was rebuilt every
+  time `streamFps` flipped (20+ times/sec while sensors eased). Now a
+  self-scheduling `setTimeout` chain reads `streamFps`/`panelRotate`
+  through refs and only tears down on `streaming` toggle. Also polls at
+  1Hz while the backend socket is down (was burning CPU on JPEG encodes
+  no one would receive).
+- **Backend disconnect left stale sensor state**: `ws.onclose` didn't
+  reset sensors / notifyStatus / spectrumStatus, so the first-run
+  wizard's "backend connection" light stayed green after the socket
+  died. Now resets the full backend-derived state slice.
+- **Malformed WebSocket JSON crashed the message handler**: unguarded
+  `JSON.parse` in `ws.onmessage` now wrapped in try/catch, with a shape
+  check before dispatch.
+- **Debug hooks exposed in production**: `window.__injectSensors` and
+  `window.__injectMedia` (used for eyes-free screenshots) are now
+  dev-only. `window.__backendUrl` is gated to loopback WebSockets and
+  the shutdown blanking path in `main.cjs` re-validates before use.
+- **Global keyboard shortcuts leaked through open modals**: Delete /
+  Ctrl+Z / arrows hit the underlying layout while the bg editor or
+  wizard was open. Handler now bails when a modal backdrop is mounted.
+- **BgEditorModal keyboard control**: added Escape (cancel) and Enter
+  (apply) bindings.
+- **Presets lost video backgrounds** on save / load / export /
+  import — image path only. `PresetEntry` gained a `videoMedia?: Blob`
+  field, and export round-trips the video as a base64 data URL.
+- **Presets import accepted any JSON** and swallowed all errors. Now
+  shape-validates the parsed object and surfaces a message when
+  something looks wrong.
+- **Preset save silently overwrote existing presets**. Prompts for
+  confirmation before clobbering.
+- **Portrait panelRotate coordinate leaks**: drag snap targets, guide
+  lines, GlassPanel bg sampling, and the toast overlay right-edge were
+  computed against landscape `PANEL_W`/`PANEL_H`. Now use logical
+  dimensions.
+- **CSP hardening**: added `object-src 'none'`, `frame-src 'none'`,
+  `form-action 'none'`, `worker-src 'self'` (defense in depth for
+  future untrusted embeds).
+- **Layout save flooded localStorage during drags**: now debounced
+  300ms and surfaces a toast if the write throws (quota, etc.).
+- **`useSmoothedSensors` rAF loop no longer runs when idle**: previous
+  version scheduled a frame every ~16 ms whether or not any sensor was
+  actually gliding. Now sleeps when settled and wakes on target change.
+- **External links in Electron did nothing**: `setWindowOpenHandler`
+  denied all URLs. Legitimate https: links (README, troubleshooting
+  docs) now route through `shell.openExternal`.
+- **UpdateBell popover missed Escape and touchstart**: now closes on
+  Escape and on outside touch as well as outside mousedown.
+- **`server.py` handler could leak `CLIENTS` on early send failure**:
+  the initial notify/media sends happened before `try:` — a socket
+  that died mid-handshake would keep its entry. Now inside the outer
+  try, and the sensor_task cancel `awaits` briefly so the executor
+  read can't outlive the socket.
+
 ## [1.10.0] — 2026-07-05
 
 ### Added
@@ -132,6 +241,7 @@ Highlights: PyInstaller-bundled backend, admin-scheduled logon task,
 notification mirror, SMTC now-playing, WASAPI-loopback audio visualizer,
 adaptive fps, animated GIF backgrounds, drag snapping, undo/redo.
 
+[1.11.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.11.0
 [1.10.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.10.0
 [1.9.1]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.9.1
 [1.9.0]: https://github.com/Nekunegi/TrofeoVisionStudio/releases/tag/v1.9.0

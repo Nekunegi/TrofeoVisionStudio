@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { loadBgMedia } from './bgStore'
+import { loadBgMedia, loadBgVideoUrl, IDB_BG_VIDEO } from './bgStore'
 
 // Decode an image (animated GIF/WebP or static) and return the current frame as
 // a CanvasImageSource plus the source's native frame rate, advancing on our own
@@ -40,7 +40,12 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
   const [fps, setFps] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!src) { setFrame(null); setFps(null); return }
+    // Clear the previous frame immediately on src change so downstream
+    // consumers (like the bg editor modal) don't measure the OLD image while
+    // the new one is still decoding.
+    setFrame(null)
+    setFps(null)
+    if (!src) return
     let cancelled = false
     let raf = 0
     let dec: any = null
@@ -70,7 +75,70 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
       img.src = actual
     }
 
+    // Video-backed background: <video> plays off-screen and its current frame
+    // is blitted to a canvas that Konva reads. requestVideoFrameCallback keeps
+    // the paint in sync with actual decode ticks; rAF is a fallback for older
+    // Chromium builds.
+    // Two separate handle vars because vfc and rAF live in different ID
+    // namespaces — mixing cancelAnimationFrame with a vfc handle silently
+    // no-ops (or cancels the wrong callback).
+    let vid: HTMLVideoElement | null = null
+    let vfcHandle = 0
+    let vidRafHandle = 0
+    let objectUrl: string | null = null
+    let vidBuffers: [HTMLCanvasElement, HTMLCanvasElement] | null = null
+    let vidFlip = 0
+
+    async function runVideo() {
+      const url = await loadBgVideoUrl()
+      if (!url || cancelled) { setFrame(null); setFps(null); return }
+      objectUrl = url
+      vid = document.createElement('video')
+      vid.src = url
+      vid.muted = true
+      vid.loop = true
+      vid.playsInline = true
+      vid.autoplay = true
+      try { await vid.play() } catch { /* browser autoplay policy — muted video should be fine */ }
+
+      await new Promise<void>((res) => {
+        if (vid!.readyState >= 2) res()
+        else vid!.addEventListener('loadeddata', () => res(), { once: true })
+      })
+      if (cancelled) return
+
+      const w = vid.videoWidth || 1920
+      const h = vid.videoHeight || 480
+      // Double buffer so setFrame receives a NEW canvas ref each tick —
+      // React useState bails on Object.is equality, so reusing the same
+      // canvas causes zero re-renders and Konva paints a static frame.
+      vidBuffers = [document.createElement('canvas'), document.createElement('canvas')]
+      for (const c of vidBuffers) { c.width = w; c.height = h }
+      setFps(30) // fps isn't exposed by <video>; 30 is a reasonable target
+
+      const AnyVid = vid as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: () => void) => number
+        cancelVideoFrameCallback?: (h: number) => void
+      }
+      const useVfc = typeof AnyVid.requestVideoFrameCallback === 'function'
+      const draw = () => {
+        if (cancelled || !vid || !vidBuffers) return
+        vidFlip ^= 1
+        const c = vidBuffers[vidFlip]
+        c.getContext('2d')!.drawImage(vid, 0, 0, w, h)
+        setFrame(c)
+        if (useVfc) vfcHandle = AnyVid.requestVideoFrameCallback!(draw)
+        else vidRafHandle = requestAnimationFrame(draw)
+      }
+      draw()
+    }
+
     async function run() {
+      // Video path: sentinel signals a Blob is in IndexedDB. The sentinel
+      // may carry a `#<epoch>` suffix that forces this effect to re-run
+      // when the same-type media is replaced (React dep compare would
+      // otherwise see the same string and skip the effect entirely).
+      if (src!.startsWith(IDB_BG_VIDEO)) { runVideo(); return }
       // 'idb:bg' is the sentinel for user media persisted in IndexedDB
       // (background GIFs blow the localStorage quota) — resolve it first.
       const actual = src!.startsWith('idb:') ? await loadBgMedia() : src!
@@ -132,6 +200,15 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
       cancelled = true
       cancelAnimationFrame(raf)
       dec?.close?.()
+      if (vid) {
+        const AnyVid = vid as HTMLVideoElement & { cancelVideoFrameCallback?: (h: number) => void }
+        if (vfcHandle) AnyVid.cancelVideoFrameCallback?.(vfcHandle)
+        if (vidRafHandle) cancelAnimationFrame(vidRafHandle)
+        vid.pause()
+        vid.removeAttribute('src')
+        vid.load()
+      }
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [src])
 
