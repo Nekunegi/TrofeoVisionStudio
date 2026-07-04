@@ -22,6 +22,7 @@ import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
 import { LayerPanel } from './components/LayerPanel'
 import { WidgetPalette } from './components/WidgetPalette'
+import { FirstRunWizard } from './components/FirstRunWizard'
 import './App.css'
 
 let idc = 0
@@ -354,6 +355,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <FirstRunWizard backend={backend} />
       <header>
         <div className="brand">
           <span className="logo"><MonitorCog size={15} strokeWidth={2.2} /></span>

@@ -1,5 +1,8 @@
 # Trofeo Vision Studio
 
+[![CI](https://github.com/Nekunegi/TrofeoVisionStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/Nekunegi/TrofeoVisionStudio/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Nekunegi/TrofeoVisionStudio?display_name=tag)](https://github.com/Nekunegi/TrofeoVisionStudio/releases/latest)
+
 A homebrew driver and dashboard editor for the **Thermalright Trofeo Vision LCD**
 (USB `0416:5408`, 1920×480), replacing the bundled TRCC software.
 Windows only, built with Electron + React + Python.

@@ -1,5 +1,8 @@
 # Trofeo Vision Studio
 
+[![CI](https://github.com/Nekunegi/TrofeoVisionStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/Nekunegi/TrofeoVisionStudio/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Nekunegi/TrofeoVisionStudio?display_name=tag)](https://github.com/Nekunegi/TrofeoVisionStudio/releases/latest)
+
 **Thermalright Trofeo Vision LCD** (USB `0416:5408` / 1920×480) を、純正の
 TRCC ソフトを使わずに制御するための **自作ドライバ + ダッシュボードエディタ**
 (Windows / Electron + React + Python)。
