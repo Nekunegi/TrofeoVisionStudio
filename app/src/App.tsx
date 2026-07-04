@@ -178,10 +178,17 @@ export default function App() {
       if (!stage) return
       // Capture only the content layer — layer 1 holds editor chrome (resize
       // handles) that must never reach the panel.
+      const l = layoutRef.current
+      const contrast = l.lcdContrast ?? 1
+      const saturation = l.lcdSaturation ?? 1
+      const brightness = l.lcdBrightness ?? 1
+      const needsFilter = contrast !== 1 || saturation !== 1 || brightness !== 1
       let url: string
-      if (rotate180) {
+      if (rotate180 || needsFilter) {
         // Konva's backing canvas may be devicePixelRatio-scaled; drawImage with
         // explicit destination size normalizes it back to panel resolution.
+        // We also route through this canvas when the LCD-adjust filter is set
+        // (Konva's layer.toDataURL can't apply ctx.filter for us).
         const src = stage.getLayers()[0].getCanvas()._canvas
         let rc = rotCanvasRef.current
         if (!rc) {
@@ -192,8 +199,13 @@ export default function App() {
         }
         const ctx = rc.getContext('2d')!
         ctx.save()
-        ctx.translate(PANEL_W, PANEL_H)
-        ctx.rotate(Math.PI)
+        if (needsFilter) {
+          ctx.filter = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`
+        }
+        if (rotate180) {
+          ctx.translate(PANEL_W, PANEL_H)
+          ctx.rotate(Math.PI)
+        }
         ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
         ctx.restore()
         url = rc.toDataURL('image/jpeg', 0.72)
@@ -467,6 +479,37 @@ export default function App() {
               <input type="checkbox" checked={rotate180}
                 onChange={(e) => commit((l) => ({ ...l, rotate180: e.target.checked }))} />
             </label>
+          </section>
+
+          <section>
+            <h3><MonitorCog size={13} />LCD Adjust</h3>
+            <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>
+              パネルが暗く感じるとき: コントラストと彩度を少し上げると
+              中間トーンが締まって見えます(ピーク輝度はハード側で頭打ち)
+            </p>
+            <label className="row"><span className="lbl">Contrast</span>
+              <input type="range" min={0.7} max={1.6} step={0.05}
+                value={layout.lcdContrast ?? 1}
+                onChange={(e) => commit((l) => ({ ...l, lcdContrast: +e.target.value }))} />
+              <span className="val">{(layout.lcdContrast ?? 1).toFixed(2)}</span>
+            </label>
+            <label className="row"><span className="lbl">Saturation</span>
+              <input type="range" min={0.7} max={1.6} step={0.05}
+                value={layout.lcdSaturation ?? 1}
+                onChange={(e) => commit((l) => ({ ...l, lcdSaturation: +e.target.value }))} />
+              <span className="val">{(layout.lcdSaturation ?? 1).toFixed(2)}</span>
+            </label>
+            <label className="row"><span className="lbl">Brightness</span>
+              <input type="range" min={0.7} max={1.6} step={0.05}
+                value={layout.lcdBrightness ?? 1}
+                onChange={(e) => commit((l) => ({ ...l, lcdBrightness: +e.target.value }))} />
+              <span className="val">{(layout.lcdBrightness ?? 1).toFixed(2)}</span>
+            </label>
+            <div className="row">
+              <button onClick={() => commit((l) => ({
+                ...l, lcdContrast: 1, lcdSaturation: 1, lcdBrightness: 1,
+              }))}>Reset</button>
+            </div>
           </section>
 
           <section>

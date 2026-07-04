@@ -5,6 +5,7 @@ import {
   METRIC_LABELS,
   type Widget, type SensorMetric, type WidgetFont,
 } from '../types'
+import { TEMPLATE_HINTS } from '../textTemplate'
 
 export function WidgetProps({ w, update, onDelete }:
 { w: Widget; update: (id: string, p: Partial<Widget>) => void; onDelete: () => void }) {
@@ -81,9 +82,26 @@ export function WidgetProps({ w, update, onDelete }:
         </>
       )}
       {w.type === 'text' && (
-        <label className="row"><span className="lbl">Text</span>
-          <input value={w.text} onChange={(e) => update(w.id, { text: e.target.value })} />
-        </label>
+        <>
+          <label className="row"><span className="lbl">Text</span>
+            <input value={w.text} onChange={(e) => update(w.id, { text: e.target.value })} />
+          </label>
+          <div className="row">
+            <span className="lbl">Vars</span>
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1, minWidth: 0,
+            }}>
+              {TEMPLATE_HINTS.map((h) => (
+                <button key={h} type="button"
+                  onClick={() => update(w.id, { text: (w.text ?? '') + h })}
+                  style={{
+                    fontSize: 10, padding: '2px 5px', opacity: 0.8,
+                    fontFamily: 'ui-monospace, Menlo, monospace',
+                  }}>{h}</button>
+              ))}
+            </div>
+          </div>
+        </>
       )}
       {w.type === 'clock' && (
         <>
@@ -106,6 +124,30 @@ export function WidgetProps({ w, update, onDelete }:
           <input type="number" value={w.max}
             onChange={(e) => update(w.id, { max: Math.max(1, +e.target.value) })} />
         </label>
+      )}
+      {(w.type === 'bar' || w.type === 'graph') && (
+        <>
+          <label className="row"><span className="lbl">Warn ≥</span>
+            <input type="number" value={w.warnAt ?? ''} placeholder="off"
+              onChange={(e) => update(w.id, {
+                warnAt: e.target.value === '' ? undefined : +e.target.value,
+              })} />
+            <input type="color" value={w.warnColor ?? '#ffb74d'}
+              onChange={(e) => update(w.id, { warnColor: e.target.value })}
+              disabled={w.warnAt == null}
+              style={{ width: 32, opacity: w.warnAt == null ? 0.4 : 1 }} />
+          </label>
+          <label className="row"><span className="lbl">Crit ≥</span>
+            <input type="number" value={w.critAt ?? ''} placeholder="off"
+              onChange={(e) => update(w.id, {
+                critAt: e.target.value === '' ? undefined : +e.target.value,
+              })} />
+            <input type="color" value={w.critColor ?? '#ff5252'}
+              onChange={(e) => update(w.id, { critColor: e.target.value })}
+              disabled={w.critAt == null}
+              style={{ width: 32, opacity: w.critAt == null ? 0.4 : 1 }} />
+          </label>
+        </>
       )}
       {(w.type === 'bar' || w.type === 'gauge' || w.type === 'graph'
         || w.type === 'media' || w.type === 'weather') && (

@@ -17,6 +17,10 @@ import { ToastCard, type LcdToast } from './dashboard/ToastCard'
 import { WeatherCard } from './dashboard/WeatherCard'
 import { MediaCard } from './dashboard/MediaCard'
 import { VisualizerBars } from './dashboard/VisualizerBars'
+import { substituteTemplate } from './textTemplate'
+
+const WARN_COLOR = '#ffb74d'
+const CRIT_COLOR = '#ff5252'
 
 export type { LcdToast }
 
@@ -24,7 +28,8 @@ function renderInner(w: Widget, sensors: Sensors, now: Date, history: Sensors[],
   media: MediaState | null, spectrum: number[] | null) {
   switch (w.type) {
     case 'text':
-      return <Text text={w.text} fontSize={w.fontSize} fill={w.color}
+      return <Text text={substituteTemplate(w.text, sensors, now)}
+        fontSize={w.fontSize} fill={w.color}
         fontStyle={w.bold ? '700' : '600'} fontFamily={family(w.font, FONT_LABEL)}
         letterSpacing={w.fontSize * 0.04} />
 
@@ -89,10 +94,17 @@ function renderInner(w: Widget, sensors: Sensors, now: Date, history: Sensors[],
 
     case 'bar': {
       const v = metricValue(sensors, w.metric)
-      const frac = Math.max(0, Math.min((v ?? 0) / w.max, 1))
+      const val = v ?? 0
+      const frac = Math.max(0, Math.min(val / w.max, 1))
       const h = w.height
       const unit = METRIC_LABELS[w.metric].unit
       const rowFs = Math.max(16, Math.min(28, h * 1.1))
+      // Threshold coloring: crit beats warn beats the widget's own color.
+      const critHit = w.critAt != null && val >= w.critAt
+      const warnHit = !critHit && w.warnAt != null && val >= w.warnAt
+      const barColor = critHit ? (w.critColor ?? CRIT_COLOR)
+        : warnHit ? (w.warnColor ?? WARN_COLOR)
+          : w.color
       return (
         <>
           {w.label && (
@@ -102,7 +114,7 @@ function renderInner(w: Widget, sensors: Sensors, now: Date, history: Sensors[],
                 letterSpacing={rowFs * 0.14}
                 shadowColor="#000" shadowBlur={5} shadowOpacity={0.85} />
               <Text y={-rowFs * 1.5} width={w.width} align="right"
-                text={fmtU(v, unit)} fontSize={rowFs} fill={w.color}
+                text={fmtU(v, unit)} fontSize={rowFs} fill={barColor}
                 fontFamily={FONT_NUM} fontStyle="500"
                 shadowColor="#000" shadowBlur={5} shadowOpacity={0.85} />
             </>
@@ -121,8 +133,8 @@ function renderInner(w: Widget, sensors: Sensors, now: Date, history: Sensors[],
               cornerRadius={(h - 4) / 2}
               fillLinearGradientStartPoint={{ x: 0, y: 0 }}
               fillLinearGradientEndPoint={{ x: w.width, y: 0 }}
-              fillLinearGradientColorStops={[0, withAlpha(w.color, 0.45), 1, w.color]}
-              shadowColor={w.color} shadowBlur={8} shadowOpacity={0.5} />
+              fillLinearGradientColorStops={[0, withAlpha(barColor, 0.45), 1, barColor]}
+              shadowColor={barColor} shadowBlur={8} shadowOpacity={0.5} />
           )}
         </>
       )
@@ -243,6 +255,26 @@ function renderInner(w: Widget, sensors: Sensors, now: Date, history: Sensors[],
             c2.beginPath()
             c2.roundRect(0, 0, w.width, w.height, r)
           }}>
+            {/* Threshold bands: warn covers warn->max, crit covers crit->max on top.
+                Drawn below the plot line so the line always stays visible. */}
+            {w.warnAt != null && w.warnAt < w.max && (() => {
+              const yTop = padTop
+              const yThresh = padTop + (1 - Math.min(1, w.warnAt / w.max)) * plotH
+              const bandH = Math.max(0, yThresh - yTop)
+              return bandH > 0.5 ? (
+                <Rect x={0} y={yTop} width={w.width} height={bandH}
+                  fill={withAlpha(w.warnColor ?? WARN_COLOR, 0.14)} />
+              ) : null
+            })()}
+            {w.critAt != null && w.critAt < w.max && (() => {
+              const yTop = padTop
+              const yThresh = padTop + (1 - Math.min(1, w.critAt / w.max)) * plotH
+              const bandH = Math.max(0, yThresh - yTop)
+              return bandH > 0.5 ? (
+                <Rect x={0} y={yTop} width={w.width} height={bandH}
+                  fill={withAlpha(w.critColor ?? CRIT_COLOR, 0.18)} />
+              ) : null
+            })()}
             {pts.length >= 4 && (
               <>
                 {/* straight-edged closure (tension 0) — a smoothed closing path

@@ -75,6 +75,11 @@ export interface BarWidget extends Base {
   color: string
   label?: string // optional caption row (label left, live value right) above the bar
   panelBlur?: number // frosted-glass backdrop blur px (0/undefined = plain tint)
+  // Threshold coloring: fill switches to warnColor at warnAt, critColor at critAt.
+  warnAt?: number
+  critAt?: number
+  warnColor?: string // default '#ffb74d'
+  critColor?: string // default '#ff5252'
 }
 
 export interface ImageWidget extends Base {
@@ -103,6 +108,12 @@ export interface GraphWidget extends Base {
   color: string
   label: string
   panelBlur?: number // frosted-glass backdrop blur px on the card
+  // Threshold zones drawn as tinted bands from the top of the plot down to the
+  // threshold (values above are in the "warn" or "crit" zone).
+  warnAt?: number
+  critAt?: number
+  warnColor?: string // default '#ffb74d'
+  critColor?: string // default '#ff5252'
 }
 
 export interface MediaWidget extends Base {
@@ -161,6 +172,13 @@ export interface Layout {
   rotate180?: boolean
   bgDim?: number  // 0..1 black overlay over the background (default 0)
   bgBlur?: number // px gaussian blur on the background image (default 0)
+  // LCD compensation: canvas ctx.filter multipliers applied to the outgoing
+  // frame. 1.0 = neutral. The physical panel is fairly dim; boosting contrast
+  // and saturation makes midtones read punchier (the peak brightness itself is
+  // capped by the panel — brightness > 1 just clips highlights sooner).
+  lcdContrast?: number
+  lcdSaturation?: number
+  lcdBrightness?: number
   widgets: Widget[]
 }
 
