@@ -97,10 +97,17 @@ export default function App() {
   // Stream rate follows the content: static layouts only change at 1Hz (clock /
   // sensors), animated backgrounds stream at their native frame rate (capped).
   const targetFps = Math.min(bgFps ?? 1, fpsCeiling)
-  // Panel mounting orientation. Legacy `rotate180` maps to 180°; new field
-  // `panelRotate` supersedes it and adds 90/270 for portrait mounting.
+  // Panel mounting orientation. UI-facing values (v2 scheme):
+  //   0   = correctly mounted (the physical default — pump is upside-down,
+  //          so the hardware buffer gets a 180° flip when we emit)
+  //   90  / 270 = portrait
+  //   180 = upside-down from the user's POV
+  // Legacy schemes are migrated inline: pre-v2 stored the HARDWARE angle,
+  // where 180 was the default. Subtracting 180° (mod 360) converts to v2.
   const panelRotate: 0 | 90 | 180 | 270 =
-    layout.panelRotate ?? (layout.rotate180 === false ? 0 : 180)
+    layout.panelRotateScheme === 'v2'
+      ? (layout.panelRotate ?? 0)
+      : (((((layout.panelRotate ?? (layout.rotate180 === false ? 0 : 180)) + 180) % 360)) as 0 | 90 | 180 | 270)
   const isPortrait = panelRotate === 90 || panelRotate === 270
   const logicalW = isPortrait ? PANEL_H : PANEL_W
   const logicalH = isPortrait ? PANEL_W : PANEL_H
@@ -254,7 +261,10 @@ export default function App() {
       if (needsFilter) {
         ctx.filter = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`
       }
-      const rot = panelRotateRef.current
+      // Convert UI-facing rotation to hardware rotation: the panel is
+      // physically mounted 180° out from what the user sees, so we always
+      // add 180° when emitting to the LCD buffer.
+      const rot = ((panelRotateRef.current + 180) % 360) as 0 | 90 | 180 | 270
       switch (rot) {
         case 0:
           ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
@@ -577,23 +587,28 @@ export default function App() {
                 </label>
               </>
             )}
-
-            <label className="row"><span className="lbl">{t('bg.panelRotate')}</span>
-              <select value={panelRotate} onChange={(e) => {
-                const v = +e.target.value as 0 | 90 | 180 | 270
-                commit((l) => ({ ...l, panelRotate: v, rotate180: v === 180 }))
-              }}>
-                <option value={0}>0°</option>
-                <option value={90}>90° ({t('bg.portrait')})</option>
-                <option value={180}>180°</option>
-                <option value={270}>270° ({t('bg.portrait')})</option>
-              </select>
-            </label>
           </section>
 
           <section>
             <h3><MonitorCog size={13} />{t('section.lcdAdjust')}</h3>
             <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>{t('lcd.hint')}</p>
+            <label className="row"><span className="lbl">{t('lcd.panelRotate')}</span>
+              <select value={panelRotate} onChange={(e) => {
+                const v = +e.target.value as 0 | 90 | 180 | 270
+                commit((l) => ({
+                  ...l,
+                  panelRotate: v,
+                  panelRotateScheme: 'v2',
+                  // Keep legacy flag consistent for older backends that read it.
+                  rotate180: v === 0,
+                }))
+              }}>
+                <option value={0}>0° ({t('lcd.panelRotateDefault')})</option>
+                <option value={90}>90° ({t('bg.portrait')})</option>
+                <option value={180}>180°</option>
+                <option value={270}>270° ({t('bg.portrait')})</option>
+              </select>
+            </label>
             <label className="row"><span className="lbl">{t('lcd.contrast')}</span>
               <input type="range" min={0.7} max={1.6} step={0.05}
                 value={layout.lcdContrast ?? 1}

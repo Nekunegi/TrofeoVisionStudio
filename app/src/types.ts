@@ -178,6 +178,11 @@ export interface Layout {
   // to the outgoing frame only (editor stays in native 1920x480). If set,
   // takes precedence over rotate180.
   panelRotate?: 0 | 90 | 180 | 270
+  // Rotation scheme for panelRotate. Pre-v2 stored the raw hardware angle
+  // (so 180° was the correct-mounting default — confusing). v2 stores the
+  // user-facing angle, where 0° means correctly mounted and the +180° flip
+  // for the physically-inverted panel is applied at emit time.
+  panelRotateScheme?: 'v2'
   bgDim?: number  // 0..1 black overlay over the background (default 0)
   bgBlur?: number // px gaussian blur on the background image (default 0)
   // Background media transform — applied when painting the bgImage/video onto

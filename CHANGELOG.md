@@ -6,6 +6,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.1] — 2026-07-05
+
+### Fixed
+- **Update bell icon invisible in the header**: `.bell` inherited a
+  generic `button` padding (`7px 12px`) on top of its 30px fixed width,
+  leaving a 6px content box; the 16px SVG then flex-shrunk to zero.
+  Reset padding and margin on the bell button and its child SVG.
+- **Widget palette icons off-center**: a global `button svg
+  { margin-right: 6px }` — sized for the horizontal icon-then-text
+  pattern — pushed the icon 3px left inside the column-flex `.wbtn`
+  buttons where icon sits ABOVE label. Cancel the margin locally.
+
+### Changed
+- **Panel rotation is now labelled 0° for the correct (default)
+  mounting** instead of 180°. Internally a fixed 180° flip is applied
+  when emitting to the LCD to account for the physically upside-down
+  panel. Existing layouts are auto-migrated (pre-v2 → v2 scheme) so
+  the on-screen output is preserved.
+- **Panel rotation control moved out of the Background section into
+  LCD Adjust**, next to contrast / saturation / brightness. It's a
+  device-mounting concern, not a background-media concern — grouping
+  it with the LCD hardware settings removes the "two rotations, one
+  section" confusion between panel and image rotation.
+
 ## [1.11.0] — 2026-07-05
 
 ### Added
