@@ -193,6 +193,18 @@ main {
   min-width: 0;
 }
 
+/* Portrait mounting: the LCD preview becomes a tall narrow strip, so
+   stacking widgets underneath wastes the empty space either side of it.
+   Put the preview on the left and let the inspector spread across the
+   reclaimed horizontal area on the right. */
+main.portrait {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 20px;
+}
+main.portrait > .device { flex-shrink: 0; }
+main.portrait > .inspector { flex: 1; min-width: 0; }
+
 /* canvas framed like the physical device */
 .device {
   position: relative;

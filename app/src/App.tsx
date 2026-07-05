@@ -519,7 +519,7 @@ export default function App() {
       </header>
 
       <div className="body">
-        <main>
+        <main className={isPortrait ? 'portrait' : ''}>
           <div className="device">
             <div className="canvas-wrap" ref={wrapRef} style={{
               width: logicalW * scale,

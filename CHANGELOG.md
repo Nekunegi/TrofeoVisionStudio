@@ -6,6 +6,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.3] — 2026-07-05
+
+### Changed
+- **Portrait mode layout uses the empty horizontal space**: when panel
+  is 90°/270°, the LCD preview is a tall narrow strip that leaves the
+  main area mostly empty. `main` now switches to a two-column row, with
+  the preview docked on the left and the inspector cards spreading
+  across the reclaimed space on the right. Landscape stays as the
+  familiar stacked layout.
+
 ## [1.11.2] — 2026-07-05
 
 Panel-rotate consistency pass — every place where state assumed landscape
