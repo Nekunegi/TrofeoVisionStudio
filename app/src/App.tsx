@@ -3,10 +3,13 @@ import type Konva from 'konva'
 import {
   Upload, RotateCcw, MonitorCog, Palette,
   MousePointerClick, Bookmark, Zap, Copy, BringToFront, SendToBack, Bell,
-  Layers,
+  Layers, Undo2, Redo2,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from 'lucide-react'
 import DashboardStage, { type LcdToast } from './DashboardStage'
 import { useBackend } from './useBackend'
+import { compositorStalled } from './rafShim'
 import { useAnimatedImage } from './useAnimatedImage'
 import { useAudioSpectrum } from './useAudioSpectrum'
 import { IDB_BG, IDB_BG_VIDEO, saveBgMedia, saveBgVideo } from './bgStore'
@@ -16,7 +19,7 @@ import {
 } from './types'
 import { LS_KEY, loadLayout } from './layoutStore'
 import { fileToDataUrl } from './imageUtils'
-import { remapWidgetForRotation, clampWidget } from './widgetGeometry'
+import { remapWidgetForRotation, clampWidget, widgetBounds } from './widgetGeometry'
 import { LayoutGroup, motion } from 'motion/react'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { WidgetProps } from './components/WidgetProps'
@@ -325,28 +328,49 @@ export default function App() {
       ctx.restore()
 
       const emitAt = performance.now()
-      rc.toBlob(async (blob) => {
-        if (cancelled) return
-        if (blob) {
-          const buf = await blob.arrayBuffer()
-          if (cancelled) return
-          sendFrame(new Uint8Array(buf))
-          const p = performance.now()
-          winFrames++
-          if (p - winStart >= 1000) {
-            setMeasuredFps(Math.round(winFrames * 1000 / (p - winStart) * 10) / 10)
-            winStart = p
-            winFrames = 0
-          }
+      const deliver = (bytes: Uint8Array<ArrayBuffer>) => {
+        sendFrame(bytes)
+        const p = performance.now()
+        winFrames++
+        if (p - winStart >= 1000) {
+          setMeasuredFps(Math.round(winFrames * 1000 / (p - winStart) * 10) / 10)
+          winStart = p
+          winFrames = 0
         }
-        // Self-schedule the next tick against the CURRENT streamFps target.
-        // Reading through a ref avoids the effect-teardown thrash that
-        // happens whenever sensors flip sensorsAnimating on/off. No fixed
-        // floor: at 60fps the ideal period is 17ms; a 15ms floor would
-        // cap actual output at ~50fps once encoding takes 2ms.
+      }
+      // Self-schedule the next tick against the CURRENT streamFps target.
+      // Reading through a ref avoids the effect-teardown thrash that
+      // happens whenever sensors flip sensorsAnimating on/off. No fixed
+      // floor: at 60fps the ideal period is 17ms; a 15ms floor would
+      // cap actual output at ~50fps once encoding takes 2ms.
+      const scheduleNext = () => {
         const nextIn = Math.round(1000 / streamFpsRef.current) - (performance.now() - emitAt)
         if (!cancelled) handle = setTimeout(tick, Math.max(0, nextIn))
-      }, 'image/jpeg', 0.72)
+      }
+      if (compositorStalled()) {
+        // Hidden window (tray-resident logon start): Chromium schedules the
+        // async encoders (toBlob / OffscreenCanvas.convertToBlob) as idle
+        // tasks, and a hidden renderer only reaches them ~once per second —
+        // the loop serialized on the callback, so the LCD froze to ~1fps
+        // until the editor was opened. Synchronous toDataURL (~20ms) is
+        // immune; the base64 detour only runs while the window is hidden.
+        const url = rc.toDataURL('image/jpeg', 0.72)
+        const bin = atob(url.slice(url.indexOf(',') + 1))
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        deliver(bytes)
+        scheduleNext()
+      } else {
+        rc.toBlob(async (blob) => {
+          if (cancelled) return
+          if (blob) {
+            const buf = await blob.arrayBuffer()
+            if (cancelled) return
+            deliver(new Uint8Array(buf))
+          }
+          scheduleNext()
+        }, 'image/jpeg', 0.72)
+      }
     }
     handle = setTimeout(tick, 0)
     return () => { cancelled = true; if (handle) clearTimeout(handle) }
@@ -451,6 +475,29 @@ export default function App() {
     if (selectedIdRef.current === id) setSelectedId(null)
   }, [commit])
 
+  // Align the selected widget against the logical canvas edges/center.
+  // widgetBounds is an estimate for text-like widgets (same approximation
+  // the clamp path already relies on), exact for box-sized widgets.
+  const align = useCallback((mode: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
+    const id = selectedIdRef.current
+    if (!id) return
+    commit((l) => ({
+      ...l,
+      widgets: l.widgets.map((w) => {
+        if (w.id !== id) return w
+        const b = widgetBounds(w)
+        switch (mode) {
+          case 'left': return { ...w, x: 0 }
+          case 'hcenter': return { ...w, x: Math.round((logicalW - b.w) / 2) }
+          case 'right': return { ...w, x: Math.round(logicalW - b.w) }
+          case 'top': return { ...w, y: 0 }
+          case 'vcenter': return { ...w, y: Math.round((logicalH - b.h) / 2) }
+          case 'bottom': return { ...w, y: Math.round(logicalH - b.h) }
+        }
+      }),
+    }))
+  }, [commit, logicalW, logicalH])
+
   const nudge = useCallback((dx: number, dy: number) => {
     const id = selectedIdRef.current
     if (!id) return
@@ -491,6 +538,7 @@ export default function App() {
       <FirstRunWizard backend={backend} />
       <header>
         <div className="brand">
+          <img className="logo" src="/favicon.svg" alt="" />
           <b>Trofeo Vision <small>STUDIO</small></b>
           <span className="ver">v{pkg.version}</span>
         </div>
@@ -502,6 +550,18 @@ export default function App() {
         <span className={`pill ${backend.device === 'connected' ? 'open' : 'closed'}`}>
           <span className="dot" />{backend.device === 'connected' ? t('lcd.connected') : t('lcd.notFound')}
         </span>
+        <div className="hist">
+          <button className="iconbtn" onClick={undo}
+            disabled={past.current.length === 0}
+            title={`${t('header.undo')} (Ctrl+Z)`}>
+            <Undo2 size={14} />
+          </button>
+          <button className="iconbtn" onClick={redo}
+            disabled={future.current.length === 0}
+            title={`${t('header.redo')} (Ctrl+Y)`}>
+            <Redo2 size={14} />
+          </button>
+        </div>
         <div className="head-right">
           <span className="fpsinfo">
             {t('header.target')} <b>{targetFps} fps</b> ({bgFps ? t('header.animatedBg') : t('header.staticBg')})
@@ -567,11 +627,78 @@ export default function App() {
 
           <motion.div className="inspector" layout="position"
             transition={{ type: 'spring', stiffness: 260, damping: 30 }}>
+          {/* Fixed column stacks (not CSS columns): sections must never jump
+              between columns when the selection panel grows or shrinks. */}
+          <div className="icol">
           <section>
             <h3><Zap size={13} />{t('section.addWidget')}</h3>
             <WidgetPalette newId={newId} onAdd={addWidget} />
           </section>
+          </div>
 
+          <div className="icol">
+          <section>
+            <h3><MousePointerClick size={13} />{t('section.selection')}
+              {selected && <span className="tag">{selected.type}</span>}
+            </h3>
+            {!selected && (
+              <div className="hints">
+                <div className="hint"><kbd>{t('hint.keyClick')}</kbd><span>{t('hint.select')}</span></div>
+                <div className="hint"><kbd>← ↑ ↓ →</kbd><span>{t('hint.move')}</span></div>
+                <div className="hint"><kbd>Del</kbd><span>{t('hint.del')}</span></div>
+                <div className="hint"><kbd>Ctrl+D</kbd><span>{t('hint.dup')}</span></div>
+                <div className="hint"><kbd>Ctrl+Z / Y</kbd><span>{t('hint.undo')}</span></div>
+                <div className="hint"><kbd>{t('hint.keyDrag')}</kbd><span>{t('hint.snap')}</span></div>
+              </div>
+            )}
+            {selected && (
+              <>
+                <div className="row actions">
+                  <button onClick={duplicate}><Copy size={13} />{t('selection.copy')}</button>
+                  <button onClick={() => reorder('front')}><BringToFront size={13} />{t('selection.front')}</button>
+                  <button onClick={() => reorder('back')}><SendToBack size={13} />{t('selection.back')}</button>
+                </div>
+                <div className="row align-row">
+                  <span className="lbl">{t('selection.align')}</span>
+                  <div className="btn-group">
+                    <button title={t('selection.alignLeft')} onClick={() => align('left')}><AlignStartVertical size={13} /></button>
+                    <button title={t('selection.alignCenterH')} onClick={() => align('hcenter')}><AlignCenterVertical size={13} /></button>
+                    <button title={t('selection.alignRight')} onClick={() => align('right')}><AlignEndVertical size={13} /></button>
+                  </div>
+                  <div className="btn-group">
+                    <button title={t('selection.alignTop')} onClick={() => align('top')}><AlignStartHorizontal size={13} /></button>
+                    <button title={t('selection.alignCenterV')} onClick={() => align('vcenter')}><AlignCenterHorizontal size={13} /></button>
+                    <button title={t('selection.alignBottom')} onClick={() => align('bottom')}><AlignEndHorizontal size={13} /></button>
+                  </div>
+                </div>
+                <WidgetProps w={selected} update={update} onDelete={del} />
+                {selected.type === 'visualizer' && (
+                  vizError ? (
+                    <p className="muted">
+                      {t('selection.vizError')} {vizError.slice(0, 160)}
+                    </p>
+                  ) : spectrum == null ? (
+                    <p className="muted">{t('selection.vizStarting')}</p>
+                  ) : null
+                )}
+              </>
+            )}
+          </section>
+
+          <section>
+            <h3><Layers size={13} />{t('section.layers')} <span className="tag">{layout.widgets.length}</span></h3>
+            <LayerPanel
+              widgets={layout.widgets}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onUpdate={update}
+              onDelete={deleteById}
+              onReorder={reorderOne}
+            />
+          </section>
+          </div>
+
+          <div className="icol">
           <section>
             <h3><Palette size={13} />{t('section.background')}</h3>
             <label className="row"><span className="lbl">{t('bg.color')}</span>
@@ -709,7 +836,9 @@ export default function App() {
               }))}>{t('lcd.reset')}</button>
             </div>
           </section>
+          </div>
 
+          <div className="icol">
           <section>
             <h3><Bell size={13} />{t('section.notifications')}</h3>
             <label className="row"><span className="lbl">{t('notify.show')}</span>
@@ -732,46 +861,6 @@ export default function App() {
           </section>
 
           <section>
-            <h3><MousePointerClick size={13} />{t('section.selection')}
-              {selected && <span className="tag">{selected.type}</span>}
-            </h3>
-            {!selected && (
-              <p className="muted" style={{ whiteSpace: 'pre-line' }}>{t('selection.hint')}</p>
-            )}
-            {selected && (
-              <>
-                <div className="row">
-                  <button onClick={duplicate}><Copy size={13} />{t('selection.copy')}</button>
-                  <button onClick={() => reorder('front')}><BringToFront size={13} />{t('selection.front')}</button>
-                  <button onClick={() => reorder('back')}><SendToBack size={13} />{t('selection.back')}</button>
-                </div>
-                <WidgetProps w={selected} update={update} onDelete={del} />
-                {selected.type === 'visualizer' && (
-                  vizError ? (
-                    <p className="muted">
-                      {t('selection.vizError')} {vizError.slice(0, 160)}
-                    </p>
-                  ) : spectrum == null ? (
-                    <p className="muted">{t('selection.vizStarting')}</p>
-                  ) : null
-                )}
-              </>
-            )}
-          </section>
-
-          <section>
-            <h3><Layers size={13} />{t('section.layers')} <span className="tag">{layout.widgets.length}</span></h3>
-            <LayerPanel
-              widgets={layout.widgets}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onUpdate={update}
-              onDelete={deleteById}
-              onReorder={reorderOne}
-            />
-          </section>
-
-          <section>
             <h3><Bookmark size={13} />{t('section.presets')}</h3>
             <Presets layout={layout} onLoad={(l) => { commit(() => l); setSelectedId(null) }} />
           </section>
@@ -784,6 +873,7 @@ export default function App() {
               <RotateCcw size={13} />{t('reset.layout')}
             </button>
           </section>
+          </div>
           </motion.div>
         </LayoutGroup>
         </main>

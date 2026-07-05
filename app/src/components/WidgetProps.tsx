@@ -6,27 +6,35 @@ import {
   type Widget, type SensorMetric, type WidgetFont,
 } from '../types'
 import { TEMPLATE_HINTS } from '../textTemplate'
+import { useT } from '../i18n'
 
 export function WidgetProps({ w, update, onDelete }:
 { w: Widget; update: (id: string, p: Partial<Widget>) => void; onDelete: () => void }) {
+  const t = useT()
   const metrics = Object.keys(METRIC_LABELS) as SensorMetric[]
   return (
     <div className="props">
+      <div className="row"><span className="lbl">{t('prop.position')}</span>
+        <input type="number" value={Math.round(w.x)} aria-label="X"
+          onChange={(e) => update(w.id, { x: +e.target.value || 0 })} />
+        <input type="number" value={Math.round(w.y)} aria-label="Y"
+          onChange={(e) => update(w.id, { y: +e.target.value || 0 })} />
+      </div>
       {'color' in w && (
-        <label className="row"><span className="lbl">Color</span>
+        <label className="row"><span className="lbl">{t('prop.color')}</span>
           <input type="color" value={w.color}
             onChange={(e) => update(w.id, { color: e.target.value })} />
         </label>
       )}
       {'fontSize' in w && (
-        <label className="row"><span className="lbl">Size</span>
+        <label className="row"><span className="lbl">{t('prop.size')}</span>
           <input type="range" min={20} max={260} value={w.fontSize}
             onChange={(e) => update(w.id, { fontSize: +e.target.value })} />
           <span className="val">{w.fontSize}</span>
         </label>
       )}
       {(w.type === 'text' || w.type === 'clock' || w.type === 'sensor') && (
-        <label className="row"><span className="lbl">Font</span>
+        <label className="row"><span className="lbl">{t('prop.font')}</span>
           <select value={w.font ?? (w.type === 'text' ? 'rajdhani' : 'orbitron')}
             onChange={(e) => update(w.id, { font: e.target.value as WidgetFont })}>
             <option value="orbitron">Orbitron</option>
@@ -35,13 +43,13 @@ export function WidgetProps({ w, update, onDelete }:
           </select>
         </label>
       )}
-      <label className="row"><span className="lbl">Opacity</span>
+      <label className="row"><span className="lbl">{t('prop.opacity')}</span>
         <input type="range" min={0.1} max={1} step={0.05} value={w.opacity ?? 1}
           onChange={(e) => update(w.id, { opacity: +e.target.value })} />
         <span className="val">{Math.round((w.opacity ?? 1) * 100)}%</span>
       </label>
       {(w.type === 'sensor' || w.type === 'bar' || w.type === 'gauge' || w.type === 'graph') && (
-        <label className="row"><span className="lbl">Metric</span>
+        <label className="row"><span className="lbl">{t('prop.metric')}</span>
           <select value={w.metric}
             onChange={(e) => {
               const m = e.target.value as SensorMetric
@@ -56,13 +64,13 @@ export function WidgetProps({ w, update, onDelete }:
         </label>
       )}
       {(w.type === 'sensor' || w.type === 'gauge' || w.type === 'graph' || w.type === 'bar') && (
-        <label className="row"><span className="lbl">Label</span>
+        <label className="row"><span className="lbl">{t('prop.label')}</span>
           <input value={w.label ?? ''}
             onChange={(e) => update(w.id, { label: e.target.value })} />
         </label>
       )}
       {w.type === 'gauge' && (
-        <label className="row"><span className="lbl">Size</span>
+        <label className="row"><span className="lbl">{t('prop.size')}</span>
           <input type="range" min={100} max={460} value={w.size}
             onChange={(e) => update(w.id, { size: +e.target.value })} />
           <span className="val">{w.size}</span>
@@ -71,11 +79,11 @@ export function WidgetProps({ w, update, onDelete }:
       {(w.type === 'bar' || w.type === 'image' || w.type === 'graph'
         || w.type === 'media' || w.type === 'weather' || w.type === 'visualizer') && (
         <>
-          <label className="row"><span className="lbl">Width</span>
+          <label className="row"><span className="lbl">{t('prop.width')}</span>
             <input type="number" min={10} value={w.width}
               onChange={(e) => update(w.id, { width: Math.max(10, +e.target.value || 10) })} />
           </label>
-          <label className="row"><span className="lbl">Height</span>
+          <label className="row"><span className="lbl">{t('prop.height')}</span>
             <input type="number" min={10} value={w.height}
               onChange={(e) => update(w.id, { height: Math.max(10, +e.target.value || 10) })} />
           </label>
@@ -83,11 +91,11 @@ export function WidgetProps({ w, update, onDelete }:
       )}
       {w.type === 'text' && (
         <>
-          <label className="row"><span className="lbl">Text</span>
+          <label className="row"><span className="lbl">{t('prop.text')}</span>
             <input value={w.text} onChange={(e) => update(w.id, { text: e.target.value })} />
           </label>
           <div className="row">
-            <span className="lbl">Vars</span>
+            <span className="lbl">{t('prop.vars')}</span>
             <div style={{
               display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1, minWidth: 0,
             }}>
@@ -105,22 +113,22 @@ export function WidgetProps({ w, update, onDelete }:
       )}
       {w.type === 'clock' && (
         <>
-          <label className="row"><span className="lbl">Date</span>
+          <label className="row"><span className="lbl">{t('prop.date')}</span>
             <input type="checkbox" checked={w.withDate}
               onChange={(e) => update(w.id, { withDate: e.target.checked })} />
           </label>
-          <label className="row"><span className="lbl">Seconds</span>
+          <label className="row"><span className="lbl">{t('prop.seconds')}</span>
             <input type="checkbox" checked={w.showSeconds ?? true}
               onChange={(e) => update(w.id, { showSeconds: e.target.checked })} />
           </label>
-          <label className="row"><span className="lbl">12-hour</span>
+          <label className="row"><span className="lbl">{t('prop.twelveHour')}</span>
             <input type="checkbox" checked={w.twelveHour ?? false}
               onChange={(e) => update(w.id, { twelveHour: e.target.checked })} />
           </label>
         </>
       )}
       {(w.type === 'bar' || w.type === 'gauge' || w.type === 'graph') && (
-        <label className="row"><span className="lbl">Max</span>
+        <label className="row"><span className="lbl">{t('prop.max')}</span>
           <input type="number" value={w.max}
             onChange={(e) => update(w.id, { max: Math.max(1, +e.target.value) })} />
         </label>
@@ -151,7 +159,7 @@ export function WidgetProps({ w, update, onDelete }:
       )}
       {(w.type === 'bar' || w.type === 'gauge' || w.type === 'graph'
         || w.type === 'media' || w.type === 'weather') && (
-        <label className="row"><span className="lbl">Glass</span>
+        <label className="row"><span className="lbl">{t('prop.glass')}</span>
           <input type="range" min={0} max={30} value={w.panelBlur ?? 0}
             onChange={(e) => update(w.id, { panelBlur: +e.target.value })} />
           <span className="val">{w.panelBlur ?? 0}px</span>
@@ -160,22 +168,22 @@ export function WidgetProps({ w, update, onDelete }:
       {w.type === 'weather' && <WeatherPlaceField w={w} update={update} />}
       {w.type === 'visualizer' && (
         <>
-          <label className="row"><span className="lbl">Bars</span>
+          <label className="row"><span className="lbl">{t('prop.bars')}</span>
             <input type="range" min={12} max={96} step={4} value={w.bars}
               onChange={(e) => update(w.id, { bars: +e.target.value })} />
             <span className="val">{w.bars}</span>
           </label>
-          <label className="row"><span className="lbl">Color 2</span>
+          <label className="row"><span className="lbl">{t('prop.color2')}</span>
             <input type="color" value={w.color2 ?? w.color}
               onChange={(e) => update(w.id, { color2: e.target.value })} />
           </label>
-          <label className="row"><span className="lbl">Centered</span>
+          <label className="row"><span className="lbl">{t('prop.centered')}</span>
             <input type="checkbox" checked={w.centered ?? true}
               onChange={(e) => update(w.id, { centered: e.target.checked })} />
           </label>
         </>
       )}
-      <button className="danger wide" onClick={onDelete}><Trash2 size={13} />Delete</button>
+      <button className="danger wide" onClick={onDelete}><Trash2 size={13} />{t('prop.delete')}</button>
     </div>
   )
 }
@@ -185,6 +193,7 @@ function WeatherPlaceField({ w, update }: {
   w: Extract<Widget, { type: 'weather' }>
   update: (id: string, p: Partial<Widget>) => void
 }) {
+  const t = useT()
   const [q, setQ] = useState(w.place)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -197,15 +206,15 @@ function WeatherPlaceField({ w, update }: {
     const r = await geocode(query)
     setBusy(false)
     if (r) update(w.id, { place: r.name, lat: r.lat, lon: r.lon } as Partial<Widget>)
-    else setErr('見つかりませんでした')
+    else setErr(t('prop.cityNotFound'))
   }
   return (
     <>
-      <label className="row"><span className="lbl">City</span>
+      <label className="row"><span className="lbl">{t('prop.city')}</span>
         <input value={q} placeholder="東京 / Tokyo"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') search() }} />
-        <button onClick={search} disabled={busy}>{busy ? '…' : 'Set'}</button>
+        <button onClick={search} disabled={busy}>{busy ? '…' : t('prop.citySet')}</button>
       </label>
       {err && <p className="muted">{err}</p>}
     </>

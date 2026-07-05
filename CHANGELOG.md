@@ -6,6 +6,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.6] — 2026-07-06
+
+### Changed
+- **Inspector sections no longer jump between columns**: the sidebar was
+  CSS-columns masonry, which auto-balances — selecting a widget grew the
+  Selection card and reshuffled every section into a different column.
+  Now four fixed column stacks (Add widget / Selection+Layers /
+  Background+LCD / Notifications+Presets), responsive via grid
+  `auto-fit`. Every card keeps its place while editing.
+- **Selection panel upgrades**: numeric X/Y position inputs; six
+  alignment buttons (left/center/right, top/middle/bottom against the
+  panel edges); Copy/Front/Back as a tidy equal-width row (labels no
+  longer wrapped mid-word); all property labels localized (色 / 不透明度 /
+  メトリック … follow the JA/EN toggle).
+- **Undo/redo buttons in the header** (with hover tooltips showing
+  Ctrl+Z / Ctrl+Y), enabled/disabled to match the history state.
+- **Keyboard shortcut hints** in the empty Selection panel render as
+  styled key chips instead of a text blob.
+- **Brand icon in the header** next to the app name.
+- Keyboard-focus rings on buttons/inputs for accessibility; disabled
+  buttons now look disabled.
+
 ## [1.11.5] — 2026-07-05
 
 ### Changed

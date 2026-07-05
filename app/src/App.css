@@ -55,12 +55,9 @@ header {
 .brand .logo {
   width: 26px;
   height: 26px;
-  display: grid;
-  place-items: center;
+  display: block;
   border-radius: 7px;
-  background: linear-gradient(135deg, var(--accent-2), var(--accent));
-  color: #071018;
-  box-shadow: 0 0 14px rgba(77, 225, 255, 0.35);
+  box-shadow: 0 0 14px rgba(77, 225, 255, 0.3);
 }
 .brand b {
   font-size: 14px;
@@ -108,6 +105,29 @@ header {
 .pill.connecting { color: var(--warn); border-color: rgba(255, 200, 97, 0.25); background: rgba(255, 200, 97, 0.08); }
 .pill.connecting .dot { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
+
+/* undo / redo cluster (header, after the status pills) */
+.hist { display: inline-flex; gap: 6px; }
+.iconbtn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--sub);
+}
+.iconbtn svg { margin: 0; }
+.iconbtn:hover { color: var(--text); }
+
+button:disabled, .filebtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
 
 .head-right {
   margin-left: auto;
@@ -349,9 +369,20 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 
 /* ------------------------------------------------- inspector (below LCD) */
 
+/* Fixed column stacks — NOT CSS columns. Auto-balancing masonry made
+   sections hop between columns whenever the selection panel grew or
+   shrank; explicit stacks keep every section anchored in place. */
 .inspector {
-  column-width: 260px;
-  column-gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.icol {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 
 .inspector section {
@@ -362,16 +393,12 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   animation: fadeUp 0.3s ease both;
   min-width: 0;
-  break-inside: avoid;
-  margin-bottom: 12px;
   display: block;
 }
-/* gentle stagger on load */
-.inspector section:nth-child(2) { animation-delay: 0.04s; }
-.inspector section:nth-child(3) { animation-delay: 0.08s; }
-.inspector section:nth-child(4) { animation-delay: 0.12s; }
-.inspector section:nth-child(5) { animation-delay: 0.16s; }
-.inspector section:nth-child(6) { animation-delay: 0.2s; }
+/* gentle stagger on load, per column */
+.icol:nth-child(2) section { animation-delay: 0.05s; }
+.icol:nth-child(3) section { animation-delay: 0.1s; }
+.icol:nth-child(4) section { animation-delay: 0.15s; }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -379,6 +406,73 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 
 /* selection props swap in softly when a widget is picked */
 .props { animation: fadeUp 0.22s ease both; }
+
+/* selection quick-actions: duplicate / front / back as equal-width row */
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+  padding: 7px 4px;
+  font-size: 11.5px;
+  min-width: 0;
+}
+.actions button svg { margin-right: 0; flex-shrink: 0; }
+
+/* alignment tools: two segmented 3-button groups */
+.align-row { gap: 7px; }
+.btn-group {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.btn-group button {
+  border: 0;
+  border-radius: 0;
+  padding: 6px 9px;
+  background: var(--bg-input);
+  color: var(--sub);
+  line-height: 0;
+}
+.btn-group button + button { border-left: 1px solid var(--line-soft); }
+.btn-group button:hover {
+  color: var(--accent);
+  background: rgba(77, 225, 255, 0.08);
+  transform: none;
+  box-shadow: none;
+}
+.btn-group button svg { margin: 0; }
+
+/* keyboard-shortcut hints (selection panel empty state) */
+.hints { display: flex; flex-direction: column; gap: 7px; }
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11.5px;
+  color: var(--sub);
+}
+.hint kbd {
+  flex: none;
+  min-width: 58px;
+  text-align: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
 
 /* layer panel — top-of-stack first, one row per widget */
 .layers {
@@ -743,6 +837,14 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
   white-space: nowrap;
 }
 .preset-item .x { padding: 7px 9px; }
+
+/* visible keyboard-focus ring (accent, non-intrusive for mouse use) */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(77, 225, 255, 0.55);
+  outline-offset: 1px;
+}
 
 /* thin scrollbars everywhere */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
