@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.5] — 2026-07-05
+
+### Changed
+- **App now has a proper brand icon**: the installer, exe, taskbar entry,
+  window titlebar, tray, and browser favicon all share the cyan-blue
+  LCD-with-waveform mark instead of falling back to Electron's default.
+  Source in `app/build/icon.svg`; `.ico` embeds 16/24/32/48/64/128/256.
+
 ## [1.11.4] — 2026-07-05
 
 ### Changed

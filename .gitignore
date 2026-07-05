@@ -10,6 +10,7 @@ __pycache__/
 
 # --- PyInstaller output (server.spec is generated) ---
 build/
+!app/build/
 
 # --- Third-party binaries (not committed) ---
 # libs/  = LibreHardwareMonitor DLLs (LHM v0.9.6)

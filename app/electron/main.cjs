@@ -122,6 +122,7 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: '#0e0e13',
     title: 'Trofeo Vision Studio',
+    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
     // Logon autostart (--hidden) starts tray-only; streaming still runs because
     // backgroundThrottling is off and the page renders while hidden.
     show: !process.argv.includes('--hidden'),

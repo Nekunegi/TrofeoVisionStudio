@@ -4,6 +4,10 @@
       <stop offset="0" stop-color="#6c8cff"/>
       <stop offset="1" stop-color="#4de1ff"/>
     </linearGradient>
+    <linearGradient id="bgDeep" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5c78e8"/>
+      <stop offset="1" stop-color="#3ec5e6"/>
+    </linearGradient>
     <linearGradient id="panelFill" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0d1220"/>
       <stop offset="1" stop-color="#050810"/>
@@ -13,15 +17,36 @@
       <stop offset="0.5" stop-color="#4de1ff"/>
       <stop offset="1" stop-color="#8ea6ff"/>
     </linearGradient>
+    <radialGradient id="topGlow" cx="0.5" cy="0" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
+
   <rect width="1024" height="1024" rx="200" ry="200" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="200" ry="200" fill="url(#topGlow)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="196" ry="196"
+        fill="none" stroke="#ffffff" stroke-width="4" opacity="0.35"/>
+
   <g transform="translate(140 264)">
-    <rect x="0" y="0" width="744" height="424" rx="72" ry="72" fill="url(#panelFill)"/>
+    <rect x="0" y="0" width="744" height="424" rx="72" ry="72"
+          fill="#08111f" opacity="0.35"/>
+    <rect x="0" y="0" width="744" height="424" rx="72" ry="72"
+          fill="url(#panelFill)"/>
     <rect x="30" y="30" width="684" height="364" rx="46" ry="46"
           fill="none" stroke="#1f2a44" stroke-width="4"/>
-    <path d="M 70 300 L 200 300 L 260 130 L 360 340 L 460 170 L 560 290 L 660 90 L 700 240"
+
+    <path d="M 70 300
+             L 200 300
+             L 260 130
+             L 360 340
+             L 460 170
+             L 560 290
+             L 660 90
+             L 700 240"
           fill="none" stroke="url(#wave)" stroke-width="42"
           stroke-linecap="round" stroke-linejoin="round"/>
+
     <circle cx="80"  cy="380" r="10" fill="#4de1ff"/>
     <circle cx="118" cy="380" r="10" fill="#6c8cff" opacity="0.7"/>
     <circle cx="156" cy="380" r="10" fill="#ffffff" opacity="0.35"/>
