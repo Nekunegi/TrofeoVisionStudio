@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadBgMedia, loadBgVideoUrl, IDB_BG_VIDEO } from './bgStore'
+import { compositorStalled } from './rafShim'
 
 // Decode an image (animated GIF/WebP or static) and return the current frame as
 // a CanvasImageSource plus the source's native frame rate, advancing on our own
@@ -121,16 +122,38 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
         cancelVideoFrameCallback?: (h: number) => void
       }
       const useVfc = typeof AnyVid.requestVideoFrameCallback === 'function'
-      const draw = () => {
+      // Skip the blit when the playhead hasn't advanced — the paint may be
+      // driven by both the vfc chain and the rAF watchdog below.
+      let lastTime = -1
+      const paint = () => {
         if (cancelled || !vid || !vidBuffers) return
+        if (vid.currentTime === lastTime) return
+        lastTime = vid.currentTime
         vidFlip ^= 1
         const c = vidBuffers[vidFlip]
         c.getContext('2d')!.drawImage(vid, 0, 0, w, h)
         setFrame(c)
-        if (useVfc) vfcHandle = AnyVid.requestVideoFrameCallback!(draw)
-        else vidRafHandle = requestAnimationFrame(draw)
       }
-      draw()
+      if (useVfc) {
+        const onVfc = () => {
+          if (cancelled) return
+          paint()
+          vfcHandle = AnyVid.requestVideoFrameCallback!(onVfc)
+        }
+        vfcHandle = AnyVid.requestVideoFrameCallback!(onVfc)
+      }
+      // requestVideoFrameCallback only fires when a frame is PRESENTED, and a
+      // hidden window presents nothing — the video kept playing but the bg
+      // froze on whatever frame was up when the window was hidden. The shimmed
+      // rAF loop keeps painting while the compositor is stalled (and is the
+      // only driver when vfc is unsupported).
+      const rafLoop = () => {
+        if (cancelled) return
+        if (!useVfc || compositorStalled()) paint()
+        vidRafHandle = requestAnimationFrame(rafLoop)
+      }
+      paint()
+      vidRafHandle = requestAnimationFrame(rafLoop)
     }
 
     async function run() {

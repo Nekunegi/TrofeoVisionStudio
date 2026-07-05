@@ -32,7 +32,10 @@ let beatGap = Infinity
   })
 })()
 
-function compositorStalled(): boolean {
+// Exported: the stream loop switches to synchronous frame encoding while the
+// compositor is stalled — async encoders (toBlob/convertToBlob) are idle-task
+// scheduled in hidden windows and take ~1s per call.
+export function compositorStalled(): boolean {
   return beatGap > 100 || performance.now() - prevBeat > 200
 }
 
@@ -72,5 +75,3 @@ window.requestAnimationFrame = (cb: FrameCb): number => {
   return id
 }
 window.cancelAnimationFrame = (id: number) => { queue.delete(id) }
-
-export {}

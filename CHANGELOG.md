@@ -28,6 +28,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Keyboard-focus rings on buttons/inputs for accessibility; disabled
   buttons now look disabled.
 
+### Fixed
+- **LCD ran at ~1fps after logon until the editor window was opened**
+  (regression introduced in 1.8.0). The tray-resident hidden window
+  encodes frames with `canvas.toBlob`, which Chromium schedules as an
+  idle task — hidden renderers reach idle tasks only ~once per second,
+  and the stream loop serialized on the callback. The loop now switches
+  to synchronous `toDataURL` encoding while the compositor is stalled
+  (window hidden) and keeps the faster `toBlob` path when visible.
+  Measured hidden output: 1fps → ~18fps (20fps target).
+- **Video backgrounds froze while the window was hidden**:
+  `requestVideoFrameCallback` only fires when a frame is presented, and
+  a hidden window presents nothing. A shim-paced rAF watchdog now keeps
+  painting video frames whenever the compositor is stalled.
+
 ## [1.11.5] — 2026-07-05
 
 ### Changed
