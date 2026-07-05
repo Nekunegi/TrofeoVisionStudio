@@ -627,78 +627,11 @@ export default function App() {
 
           <motion.div className="inspector" layout="position"
             transition={{ type: 'spring', stiffness: 260, damping: 30 }}>
-          {/* Fixed column stacks (not CSS columns): sections must never jump
-              between columns when the selection panel grows or shrinks. */}
-          <div className="icol">
           <section>
             <h3><Zap size={13} />{t('section.addWidget')}</h3>
             <WidgetPalette newId={newId} onAdd={addWidget} />
           </section>
-          </div>
 
-          <div className="icol">
-          <section>
-            <h3><MousePointerClick size={13} />{t('section.selection')}
-              {selected && <span className="tag">{selected.type}</span>}
-            </h3>
-            {!selected && (
-              <div className="hints">
-                <div className="hint"><kbd>{t('hint.keyClick')}</kbd><span>{t('hint.select')}</span></div>
-                <div className="hint"><kbd>← ↑ ↓ →</kbd><span>{t('hint.move')}</span></div>
-                <div className="hint"><kbd>Del</kbd><span>{t('hint.del')}</span></div>
-                <div className="hint"><kbd>Ctrl+D</kbd><span>{t('hint.dup')}</span></div>
-                <div className="hint"><kbd>Ctrl+Z / Y</kbd><span>{t('hint.undo')}</span></div>
-                <div className="hint"><kbd>{t('hint.keyDrag')}</kbd><span>{t('hint.snap')}</span></div>
-              </div>
-            )}
-            {selected && (
-              <>
-                <div className="row actions">
-                  <button onClick={duplicate}><Copy size={13} />{t('selection.copy')}</button>
-                  <button onClick={() => reorder('front')}><BringToFront size={13} />{t('selection.front')}</button>
-                  <button onClick={() => reorder('back')}><SendToBack size={13} />{t('selection.back')}</button>
-                </div>
-                <div className="row align-row">
-                  <span className="lbl">{t('selection.align')}</span>
-                  <div className="btn-group">
-                    <button title={t('selection.alignLeft')} onClick={() => align('left')}><AlignStartVertical size={13} /></button>
-                    <button title={t('selection.alignCenterH')} onClick={() => align('hcenter')}><AlignCenterVertical size={13} /></button>
-                    <button title={t('selection.alignRight')} onClick={() => align('right')}><AlignEndVertical size={13} /></button>
-                  </div>
-                  <div className="btn-group">
-                    <button title={t('selection.alignTop')} onClick={() => align('top')}><AlignStartHorizontal size={13} /></button>
-                    <button title={t('selection.alignCenterV')} onClick={() => align('vcenter')}><AlignCenterHorizontal size={13} /></button>
-                    <button title={t('selection.alignBottom')} onClick={() => align('bottom')}><AlignEndHorizontal size={13} /></button>
-                  </div>
-                </div>
-                <WidgetProps w={selected} update={update} onDelete={del} />
-                {selected.type === 'visualizer' && (
-                  vizError ? (
-                    <p className="muted">
-                      {t('selection.vizError')} {vizError.slice(0, 160)}
-                    </p>
-                  ) : spectrum == null ? (
-                    <p className="muted">{t('selection.vizStarting')}</p>
-                  ) : null
-                )}
-              </>
-            )}
-          </section>
-
-          <section>
-            <h3><Layers size={13} />{t('section.layers')} <span className="tag">{layout.widgets.length}</span></h3>
-            <LayerPanel
-              widgets={layout.widgets}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onUpdate={update}
-              onDelete={deleteById}
-              onReorder={reorderOne}
-            />
-          </section>
-          </div>
-
-          <div className="icol">
           <section>
             <h3><Palette size={13} />{t('section.background')}</h3>
             <label className="row"><span className="lbl">{t('bg.color')}</span>
@@ -836,9 +769,7 @@ export default function App() {
               }))}>{t('lcd.reset')}</button>
             </div>
           </section>
-          </div>
 
-          <div className="icol">
           <section>
             <h3><Bell size={13} />{t('section.notifications')}</h3>
             <label className="row"><span className="lbl">{t('notify.show')}</span>
@@ -873,10 +804,73 @@ export default function App() {
               <RotateCcw size={13} />{t('reset.layout')}
             </button>
           </section>
-          </div>
           </motion.div>
         </LayoutGroup>
         </main>
+
+        {/* Pinned right panel: the two height-volatile sections live here so
+            the masonry below the canvas never reflows while editing. */}
+        <aside className="side">
+          <section>
+            <h3><MousePointerClick size={13} />{t('section.selection')}
+              {selected && <span className="tag">{selected.type}</span>}
+            </h3>
+            {!selected && (
+              <div className="hints">
+                <div className="hint"><kbd>{t('hint.keyClick')}</kbd><span>{t('hint.select')}</span></div>
+                <div className="hint"><kbd>← ↑ ↓ →</kbd><span>{t('hint.move')}</span></div>
+                <div className="hint"><kbd>Del</kbd><span>{t('hint.del')}</span></div>
+                <div className="hint"><kbd>Ctrl+D</kbd><span>{t('hint.dup')}</span></div>
+                <div className="hint"><kbd>Ctrl+Z / Y</kbd><span>{t('hint.undo')}</span></div>
+                <div className="hint"><kbd>{t('hint.keyDrag')}</kbd><span>{t('hint.snap')}</span></div>
+              </div>
+            )}
+            {selected && (
+              <>
+                <div className="row actions">
+                  <button onClick={duplicate}><Copy size={13} />{t('selection.copy')}</button>
+                  <button onClick={() => reorder('front')}><BringToFront size={13} />{t('selection.front')}</button>
+                  <button onClick={() => reorder('back')}><SendToBack size={13} />{t('selection.back')}</button>
+                </div>
+                <div className="row align-row">
+                  <span className="lbl">{t('selection.align')}</span>
+                  <div className="btn-group">
+                    <button title={t('selection.alignLeft')} onClick={() => align('left')}><AlignStartVertical size={13} /></button>
+                    <button title={t('selection.alignCenterH')} onClick={() => align('hcenter')}><AlignCenterVertical size={13} /></button>
+                    <button title={t('selection.alignRight')} onClick={() => align('right')}><AlignEndVertical size={13} /></button>
+                  </div>
+                  <div className="btn-group">
+                    <button title={t('selection.alignTop')} onClick={() => align('top')}><AlignStartHorizontal size={13} /></button>
+                    <button title={t('selection.alignCenterV')} onClick={() => align('vcenter')}><AlignCenterHorizontal size={13} /></button>
+                    <button title={t('selection.alignBottom')} onClick={() => align('bottom')}><AlignEndHorizontal size={13} /></button>
+                  </div>
+                </div>
+                <WidgetProps w={selected} update={update} onDelete={del} />
+                {selected.type === 'visualizer' && (
+                  vizError ? (
+                    <p className="muted">
+                      {t('selection.vizError')} {vizError.slice(0, 160)}
+                    </p>
+                  ) : spectrum == null ? (
+                    <p className="muted">{t('selection.vizStarting')}</p>
+                  ) : null
+                )}
+              </>
+            )}
+          </section>
+
+          <section>
+            <h3><Layers size={13} />{t('section.layers')} <span className="tag">{layout.widgets.length}</span></h3>
+            <LayerPanel
+              widgets={layout.widgets}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onUpdate={update}
+              onDelete={deleteById}
+              onReorder={reorderOne}
+            />
+          </section>
+        </aside>
       </div>
       {bgEditorOpen && bgEl && (
         <BgEditorModal

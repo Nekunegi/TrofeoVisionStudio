@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.7] — 2026-07-06
+
+### Fixed
+- **1.11.6's fixed-column sidebar looked broken**: four fixed-height
+  column stacks left large empty gaps below short columns and wrapped
+  awkwardly at some window widths (user report: "UIの崩れや無駄なスペース").
+  New split: the two height-volatile sections (Selection, Layers) are
+  pinned in a dedicated right side panel with its own scroll, and the
+  settings sections (Add widget / Background / LCD / Notifications /
+  Presets) went back to the original dense CSS-columns masonry — their
+  heights are static, so the old column-jumping can't recur.
+
 ## [1.11.6] — 2026-07-06
 
 ### Changed
