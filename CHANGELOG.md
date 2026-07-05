@@ -6,6 +6,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.4] — 2026-07-05
+
+### Changed
+- **Panel-rotate layout transition is animated**: switching between
+  landscape and portrait used to snap — the preview and inspector jumped
+  to their new positions in one frame. Now they spring smoothly to their
+  new spots via `motion/react` `LayoutGroup`. New dependency: `motion`.
+- **Portrait preview no longer capped at 420px tall**: the height cap was
+  a landscape-oriented number that left the LCD strip at 105×420 in
+  portrait. Portrait uses `body clientHeight − 60`, giving the strip
+  most of the window height. Landscape stays as before (widgets don't
+  crowd the inspector below them).
+
 ## [1.11.3] — 2026-07-05
 
 ### Changed

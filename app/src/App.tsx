@@ -17,6 +17,7 @@ import {
 import { LS_KEY, loadLayout } from './layoutStore'
 import { fileToDataUrl } from './imageUtils'
 import { remapWidgetForRotation, clampWidget } from './widgetGeometry'
+import { LayoutGroup, motion } from 'motion/react'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
@@ -204,26 +205,37 @@ export default function App() {
   useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el) return
-    // Fit both dimensions: portrait would be 480×1920 (way taller than wide),
-    // so we cap by height too — 420px is a comfortable viewport slice.
-    const MAX_H = 420
+    // Height cap tuned per orientation:
+    //   landscape (480 tall) — 420px slice keeps the widgets from dominating
+    //     the window; inspector sits below it.
+    //   portrait (1920 tall) — 420 is way too small (a 105×420 stripe).
+    //     Inspector sits BESIDE the preview so we can use most of the
+    //     window height. Read the actual body height to cap dynamically.
+    const bodyEl = document.querySelector('.body') as HTMLElement | null
+    const maxH = isPortrait
+      ? Math.max(500, (bodyEl?.clientHeight ?? 900) - 60)
+      : 420
     // clientWidth of the wrap is set from the current scale, so use the
     // parent (.device) which is not scaled by our own output.
     const parent = el.parentElement
-    const availW = parent ? parent.clientWidth : el.clientWidth
     const fit = () => {
       const w = parent ? parent.clientWidth : el.clientWidth
-      const s = Math.min(1, w / logicalW, MAX_H / logicalH)
+      const h = isPortrait
+        ? Math.max(500, (bodyEl?.clientHeight ?? 900) - 60)
+        : 420
+      const s = Math.min(1, w / logicalW, h / logicalH)
       setScale(s)
     }
     // Watch the PARENT for width changes — our own wrap width is derived
     // from scale, so observing it would loop.
     const ro = new ResizeObserver(fit)
-    const s = Math.min(1, availW / logicalW, MAX_H / logicalH)
+    const availW = parent ? parent.clientWidth : el.clientWidth
+    const s = Math.min(1, availW / logicalW, maxH / logicalH)
     setScale(s)
     if (parent) ro.observe(parent)
+    if (bodyEl) ro.observe(bodyEl)
     return () => ro.disconnect()
-  }, [logicalW, logicalH])
+  }, [logicalW, logicalH, isPortrait])
 
   // Reused offscreen canvas for the panel-rotation compositing (editor stays
   // in logical coords; this canvas is the physical 1920×480 hardware buffer).
@@ -520,12 +532,16 @@ export default function App() {
 
       <div className="body">
         <main className={isPortrait ? 'portrait' : ''}>
-          <div className="device">
-            <div className="canvas-wrap" ref={wrapRef} style={{
-              width: logicalW * scale,
-              height: logicalH * scale,
-              margin: '0 auto',
-            }}>
+        <LayoutGroup>
+          <motion.div className="device" layout="position"
+            transition={{ type: 'spring', stiffness: 260, damping: 30 }}>
+            <motion.div className="canvas-wrap" ref={wrapRef} layout
+              transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+              style={{
+                width: logicalW * scale,
+                height: logicalH * scale,
+                margin: '0 auto',
+              }}>
               <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
                 <DashboardStage
                   ref={stageRef}
@@ -546,10 +562,11 @@ export default function App() {
                   onResize={resize}
                 />
               </div>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
 
-          <div className="inspector">
+          <motion.div className="inspector" layout="position"
+            transition={{ type: 'spring', stiffness: 260, damping: 30 }}>
           <section>
             <h3><Zap size={13} />{t('section.addWidget')}</h3>
             <WidgetPalette newId={newId} onAdd={addWidget} />
@@ -767,7 +784,8 @@ export default function App() {
               <RotateCcw size={13} />{t('reset.layout')}
             </button>
           </section>
-          </div>
+          </motion.div>
+        </LayoutGroup>
         </main>
       </div>
       {bgEditorOpen && bgEl && (
