@@ -29,8 +29,11 @@ function readSrcDims(el: CanvasImageSource): { w: number; h: number } {
 }
 
 // Derive the initial crop rectangle in source pixels.
-// If the current layout has explicit crop insets, use them; otherwise start
-// with the largest aspect-matched rect centered on the source (cover fit).
+// If the layout has stored crop insets AND their aspect still matches the
+// current panel aspect, reuse them. If the aspect drifted (user rotated the
+// panel between edits — e.g. landscape → portrait), fall through to a fresh
+// aspect-fit rect so the editor doesn't display a rect that's the wrong
+// shape for the current panel.
 function initialRect(layout: Partial<Layout>, srcW: number, srcH: number, panelAspect: number): CropRect {
   const hasCrop = (layout.bgCropT ?? 0) + (layout.bgCropR ?? 0) +
     (layout.bgCropB ?? 0) + (layout.bgCropL ?? 0) > 0
@@ -39,7 +42,12 @@ function initialRect(layout: Partial<Layout>, srcW: number, srcH: number, panelA
     const y = ((layout.bgCropT ?? 0) / 100) * srcH
     const w = srcW * (1 - (layout.bgCropL ?? 0) / 100 - (layout.bgCropR ?? 0) / 100)
     const h = srcH * (1 - (layout.bgCropT ?? 0) / 100 - (layout.bgCropB ?? 0) / 100)
-    return { x, y, w, h }
+    // Panel aspect drift check: keep stored crop only if it still matches
+    // the panel aspect (within ~2%). Otherwise reset — the user changed the
+    // panel orientation since the last crop was made.
+    if (h > 0 && Math.abs(w / h - panelAspect) / panelAspect < 0.02) {
+      return { x, y, w, h }
+    }
   }
   // Aspect-fit inside the source. If source is wider than panel aspect,
   // the crop rect is the full height; else full width.

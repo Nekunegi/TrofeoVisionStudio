@@ -79,10 +79,24 @@ export function Presets({ layout, onLoad }: { layout: Layout; onLoad: (l: Layout
   }
 
   // Minimal shape validation before committing an imported layout.
+  // Also rejects out-of-domain panelRotate values — the emit switch only
+  // handles 0/90/180/270, so a stray 45 would silently blank the LCD.
   const isPlausibleLayout = (o: unknown): o is Layout => {
     if (!o || typeof o !== 'object') return false
     const l = o as Partial<Layout>
-    return typeof l.bgColor === 'string' && Array.isArray(l.widgets)
+    if (typeof l.bgColor !== 'string') return false
+    if (!Array.isArray(l.widgets)) return false
+    if (l.panelRotate !== undefined && ![0, 90, 180, 270].includes(l.panelRotate)) return false
+    return true
+  }
+
+  const clearBgTransforms = (l: Layout) => {
+    l.bgImage = null
+    l.bgCropT = l.bgCropR = l.bgCropB = l.bgCropL = 0
+    l.bgOffsetX = l.bgOffsetY = 0
+    l.bgScale = 1
+    l.bgRotate = 0
+    l.bgFlipX = l.bgFlipY = false
   }
 
   const importJson = async (f: File) => {
@@ -98,14 +112,24 @@ export function Presets({ layout, onLoad }: { layout: Layout; onLoad: (l: Layout
       }
       const l = { ...rest }
       const stamp = `#${Date.now()}`
-      if (isImageBg(l.bgImage) && __bgMedia) {
-        await saveBgMedia(__bgMedia)
-        l.bgImage = IDB_BG + stamp
-      } else if (isVideoBg(l.bgImage) && __bgVideoMedia) {
-        // data-URL → Blob roundtrip so the video path can save it.
-        const blob = await (await fetch(__bgVideoMedia)).blob()
-        await saveBgVideo(blob)
-        l.bgImage = IDB_BG_VIDEO + stamp
+      // Sentinel-without-payload: clear the whole bg block instead of
+      // silently keeping the current session's IDB media pointed at the
+      // imported layout — leaking state across configurations.
+      if (isImageBg(l.bgImage)) {
+        if (__bgMedia) {
+          await saveBgMedia(__bgMedia)
+          l.bgImage = IDB_BG + stamp
+        } else {
+          clearBgTransforms(l)
+        }
+      } else if (isVideoBg(l.bgImage)) {
+        if (__bgVideoMedia) {
+          const blob = await (await fetch(__bgVideoMedia)).blob()
+          await saveBgVideo(blob)
+          l.bgImage = IDB_BG_VIDEO + stamp
+        } else {
+          clearBgTransforms(l)
+        }
       }
       onLoad(l)
     } catch (e) {

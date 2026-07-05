@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type Konva from 'konva'
 import {
   Upload, RotateCcw, MonitorCog, Palette,
@@ -16,6 +16,7 @@ import {
 } from './types'
 import { LS_KEY, loadLayout } from './layoutStore'
 import { fileToDataUrl } from './imageUtils'
+import { remapWidgetForRotation, clampWidget } from './widgetGeometry'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
@@ -196,19 +197,31 @@ export default function App() {
     setHistory((h) => [...h.slice(-119), backend.sensors])
   }, [backend.sensors])
 
-  useEffect(() => {
+  // useLayoutEffect (not useEffect) so a panel-rotate never paints once
+  // at (new logicalW/H × old scale) — the scale correction is applied in
+  // the same tick, before the browser paints. Also cures the cold-load
+  // scale flash for portrait users (initial useState is a landscape seed).
+  useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el) return
     // Fit both dimensions: portrait would be 480×1920 (way taller than wide),
     // so we cap by height too — 420px is a comfortable viewport slice.
     const MAX_H = 420
+    // clientWidth of the wrap is set from the current scale, so use the
+    // parent (.device) which is not scaled by our own output.
+    const parent = el.parentElement
+    const availW = parent ? parent.clientWidth : el.clientWidth
     const fit = () => {
-      const s = Math.min(1, el.clientWidth / logicalW, MAX_H / logicalH)
+      const w = parent ? parent.clientWidth : el.clientWidth
+      const s = Math.min(1, w / logicalW, MAX_H / logicalH)
       setScale(s)
     }
+    // Watch the PARENT for width changes — our own wrap width is derived
+    // from scale, so observing it would loop.
     const ro = new ResizeObserver(fit)
-    fit()
-    ro.observe(el)
+    const s = Math.min(1, availW / logicalW, MAX_H / logicalH)
+    setScale(s)
+    if (parent) ro.observe(parent)
     return () => ro.disconnect()
   }, [logicalW, logicalH])
 
@@ -227,9 +240,12 @@ export default function App() {
 
   useEffect(() => {
     if (!streaming) return
-    let n = 0
-    const t0 = performance.now()
-    let lastReport = t0
+    // measuredFps is a rolling 1-second window (frames emitted / window
+    // duration), not a cumulative session average — otherwise a rate change
+    // (5→60) takes tens of seconds to converge and any earlier stall gets
+    // baked into the reported number forever.
+    let winStart = performance.now()
+    let winFrames = 0
     let cancelled = false
     let handle: ReturnType<typeof setTimeout> | null = null
 
@@ -239,7 +255,11 @@ export default function App() {
       if (!stage) { handle = setTimeout(tick, 100); return }
       // Skip encoding entirely if the backend socket is dead — sendFrame
       // would silently drop the bytes anyway. Poll at 1Hz to catch reconnect.
+      // Reset the rolling window so downtime doesn't drag the reported fps
+      // down for a full window after reconnect.
       if (linkRef.current !== 'open') {
+        winStart = performance.now()
+        winFrames = 0
         handle = setTimeout(tick, 1000)
         return
       }
@@ -284,6 +304,11 @@ export default function App() {
           ctx.rotate(-Math.PI / 2)
           ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_H, PANEL_W)
           break
+        default:
+          // Corrupt panelRotate (e.g. imported preset with a stray 45°) — fall
+          // back to identity so we still emit A frame rather than a blank one.
+          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
+          break
       }
       ctx.restore()
 
@@ -294,17 +319,20 @@ export default function App() {
           const buf = await blob.arrayBuffer()
           if (cancelled) return
           sendFrame(new Uint8Array(buf))
-          n++
           const p = performance.now()
-          if (p - lastReport >= 1000) {
-            setMeasuredFps(Math.round((n / ((p - t0) / 1000)) * 10) / 10)
-            lastReport = p
+          winFrames++
+          if (p - winStart >= 1000) {
+            setMeasuredFps(Math.round(winFrames * 1000 / (p - winStart) * 10) / 10)
+            winStart = p
+            winFrames = 0
           }
         }
         // Self-schedule the next tick against the CURRENT streamFps target.
         // Reading through a ref avoids the effect-teardown thrash that
-        // happens whenever sensors flip sensorsAnimating on/off.
-        const nextIn = Math.max(15, Math.round(1000 / streamFpsRef.current) - (performance.now() - emitAt))
+        // happens whenever sensors flip sensorsAnimating on/off. No fixed
+        // floor: at 60fps the ideal period is 17ms; a 15ms floor would
+        // cap actual output at ~50fps once encoding takes 2ms.
+        const nextIn = Math.round(1000 / streamFpsRef.current) - (performance.now() - emitAt)
         if (!cancelled) handle = setTimeout(tick, Math.max(0, nextIn))
       }, 'image/jpeg', 0.72)
     }
@@ -351,9 +379,13 @@ export default function App() {
   }, [commit])
 
   const addWidget = useCallback((w: Widget) => {
-    commit((l) => ({ ...l, widgets: [...l.widgets, w] }))
-    setSelectedId(w.id)
-  }, [commit])
+    // WidgetPalette factories hardcode landscape (1920×480) spawn coords.
+    // Clamp against the current logical canvas so portrait users don't get
+    // widgets spawning off-canvas at x=800 or x=510.
+    const clamped = clampWidget(w, logicalW, logicalH)
+    commit((l) => ({ ...l, widgets: [...l.widgets, clamped] }))
+    setSelectedId(clamped.id)
+  }, [commit, logicalW, logicalH])
 
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
@@ -489,7 +521,11 @@ export default function App() {
       <div className="body">
         <main>
           <div className="device">
-            <div className="canvas-wrap" ref={wrapRef} style={{ height: logicalH * scale, width: isPortrait ? logicalW * scale : undefined, margin: isPortrait ? '0 auto' : undefined }}>
+            <div className="canvas-wrap" ref={wrapRef} style={{
+              width: logicalW * scale,
+              height: logicalH * scale,
+              margin: '0 auto',
+            }}>
               <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
                 <DashboardStage
                   ref={stageRef}
@@ -595,12 +631,35 @@ export default function App() {
             <label className="row"><span className="lbl">{t('lcd.panelRotate')}</span>
               <select value={panelRotate} onChange={(e) => {
                 const v = +e.target.value as 0 | 90 | 180 | 270
+                // Aspect-flip effects:
+                //   - Stored bg crop was aspect-locked to the previous
+                //     orientation; reset so DashboardStage cover-fits the
+                //     raw source to the new panel aspect.
+                //   - Widget positions were laid out against the previous
+                //     logicalW/H; without remapping, widgets whose x > new
+                //     logicalW land off-canvas and become unreachable via
+                //     the stage. Rotate their centers with the panel so
+                //     the layout stays roughly intact, then clamp to bounds.
+                const wasPortrait = panelRotate === 90 || panelRotate === 270
+                const willBePortrait = v === 90 || v === 270
+                const aspectFlipped = wasPortrait !== willBePortrait
+                const rotDeltaCW = (((v - panelRotate) + 360) % 360) as 0 | 90 | 180 | 270
+                const nextLW = willBePortrait ? PANEL_H : PANEL_W
+                const nextLH = willBePortrait ? PANEL_W : PANEL_H
                 commit((l) => ({
                   ...l,
                   panelRotate: v,
                   panelRotateScheme: 'v2',
                   // Keep legacy flag consistent for older backends that read it.
                   rotate180: v === 0,
+                  ...(aspectFlipped ? {
+                    bgCropT: 0, bgCropR: 0, bgCropB: 0, bgCropL: 0,
+                  } : {}),
+                  widgets: rotDeltaCW === 0
+                    ? l.widgets
+                    : l.widgets.map((w) => aspectFlipped
+                      ? remapWidgetForRotation(w, logicalW, logicalH, nextLW, nextLH, rotDeltaCW)
+                      : clampWidget(w, nextLW, nextLH)),
                 }))
               }}>
                 <option value={0}>0° ({t('lcd.panelRotateDefault')})</option>

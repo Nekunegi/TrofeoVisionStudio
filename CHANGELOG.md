@@ -6,6 +6,64 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.2] — 2026-07-05
+
+Panel-rotate consistency pass — every place where state assumed landscape
+(1920×480) has been taught about portrait (480×1920).
+
+### Fixed
+- **Widgets stranded off-canvas after aspect flip**: rotating landscape ↔
+  portrait swapped logicalW/H but left every widget's stored x/y untouched.
+  With the default layout (gpu-g x=1520, clock x=775, graph x=560), 4 of 6
+  widgets would land outside a 480-wide portrait canvas and become
+  unreachable from the stage. Widgets now rotate through a center-mapped
+  remap on aspect flip and clamp on any other rotation.
+- **Widget palette spawned off-canvas in portrait**: factories hardcoded
+  landscape coords (gauge x=800, visualizer x=510+900). `addWidget` now
+  clamps against the current logical bounds so palette / drag-drop / any
+  future insertion site all land visible.
+- **BgEditor crop rect stuck to the previous aspect after panel rotate**:
+  stored crop insets were reused regardless of whether the current panel
+  aspect matched. Now the editor re-fits when the aspect drifts, and the
+  panel-rotate handler resets the crop on aspect flip too.
+- **ToastCard unreadable in portrait**: hardcoded `TOAST_W=540` overflowed
+  a 480-wide panel (rest position ox = 480 − 540 − 20 = −80, accent bar
+  and every glyph off-canvas). Width now clamps to `min(540, panelW − 40)`.
+- **GlassPanel bg sampling ignored every bg transform**: the "frosted
+  glass" widgets sampled the raw source with a 1:1 stretch, so the
+  blurred region behind them didn't match the visible bg — visible seam
+  at the edge of every glass card on every real background. DashboardStage
+  now mirrors the transformed bg into an offscreen panelW×panelH canvas
+  each frame; GlassPanel samples it 1:1 for seam-free glass.
+- **baseFit ignored bgRotate**: cover-fit was axis-aligned, so a 90°/270°
+  bg rotation exposed bgColor bands at the top/bottom. baseFit now uses
+  the rotated axis-aligned bounding box.
+- **60fps mode capped at ~40fps**: streaming loop's `Math.max(15, …)`
+  scheduler floor forced a 15ms wait even when the target period was
+  16.7ms. Drop the floor so 60fps mode actually runs at 60fps.
+- **measuredFps was a cumulative session average**: took tens of seconds
+  to converge after a rate change and baked in every stall since app
+  start. Now it's a rolling 1-second window; disconnect resets it.
+- **canvas-wrap paint-flash after panel rotate**: the fit hook was a
+  `useEffect`, so React committed one paint at (new logicalW/H × old
+  scale) before the correction ran. Switched to `useLayoutEffect`, and
+  now observes the parent width rather than the wrap (which is itself
+  scaled from that width). Also cures the cold-load flash for portrait
+  users whose landscape-seeded `useState(0.5)` produced a tall canvas.
+- **Landscape .canvas-wrap stretched with an asymmetric black strip**:
+  wrap was 100% wide but the LCD was height-capped, leaving a right-side
+  gutter. Now the wrap tracks `logicalW * scale` with `margin: 0 auto`,
+  so the LCD is centered in both orientations.
+- **Presets import leaked current-session IDB media**: an imported layout
+  with `bgImage: 'idb:bg#…'` but no `__bgMedia` payload would silently
+  reuse whatever image was in the session's IDB. Now those layouts clear
+  the entire bg block.
+- **Presets import accepted corrupt panelRotate**: values outside
+  {0,90,180,270} passed the shape check and reached the emit switch,
+  which handled none of them and would silently blank the LCD. The
+  shape check rejects them, and the emit switch has an identity-draw
+  default as belt-and-suspenders.
+
 ## [1.11.1] — 2026-07-05
 
 ### Fixed

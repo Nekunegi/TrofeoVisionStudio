@@ -71,6 +71,12 @@ export interface BgEnv {
   // region of the background image (portrait vs landscape differ).
   panelW: number
   panelH: number
+  // Pre-transformed offscreen canvas (panelW × panelH) with the bg drawn
+  // through the full transform chain (cover-fit, scale, offset, rotate,
+  // flip, crop). GlassPanel samples 1:1 from this so its blurred sample
+  // matches the visible bg exactly. Null when there is no bg or the canvas
+  // hasn't been built yet — fall back to sampling `el` with a 1:1 stretch.
+  bgCanvas?: HTMLCanvasElement | null
 }
 
 export function srcSize(el: CanvasImageSource): { w: number; h: number } {

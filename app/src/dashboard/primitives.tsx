@@ -35,12 +35,25 @@ export function GlassPanel({ x = 0, y = 0, w, h, radius = 0, circle = false, blu
         if (bg.el) {
           const bpx = blur + bg.blur
           const pad = bpx * 2 // blur samples past the clip edge — draw oversized
-          const { w: iw, h: ih } = srcSize(bg.el)
           c2.filter = `blur(${bpx}px)`
-          c2.drawImage(bg.el,
-            (ox + x - pad) * (iw / bg.panelW), (oy + y - pad) * (ih / bg.panelH),
-            (w + pad * 2) * (iw / bg.panelW), (h + pad * 2) * (ih / bg.panelH),
-            x - pad, y - pad, w + pad * 2, h + pad * 2)
+          if (bg.bgCanvas) {
+            // Preferred path — sample from the pre-transformed panel-sized
+            // canvas. Every bg transform (cover-fit, user scale/offset/rotate/
+            // flip/crop) is already baked in, so a 1:1 blit matches what the
+            // main stage draws. Seam-free at the glass edge.
+            c2.drawImage(bg.bgCanvas,
+              ox + x - pad, oy + y - pad, w + pad * 2, h + pad * 2,
+              x - pad, y - pad, w + pad * 2, h + pad * 2)
+          } else {
+            // Fallback: no offscreen yet (first frame) — sample the raw
+            // source with a 1:1 stretch. Not seam-accurate but avoids a
+            // one-frame flash of bare tint.
+            const { w: iw, h: ih } = srcSize(bg.el)
+            c2.drawImage(bg.el,
+              (ox + x - pad) * (iw / bg.panelW), (oy + y - pad) * (ih / bg.panelH),
+              (w + pad * 2) * (iw / bg.panelW), (h + pad * 2) * (ih / bg.panelH),
+              x - pad, y - pad, w + pad * 2, h + pad * 2)
+          }
           c2.filter = 'none'
         }
         if (bg.dim > 0) {

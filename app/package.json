@@ -2,7 +2,7 @@
   "name": "trofeo-vision-studio",
   "productName": "Trofeo Vision Studio",
   "private": true,
-  "version": "1.11.1",
+  "version": "1.11.2",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

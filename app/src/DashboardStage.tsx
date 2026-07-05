@@ -365,6 +365,14 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
   const selected = layout.widgets.find((w) => w.id === selectedId)
   // Guide lines shown while a drag is snapped (editor chrome layer only).
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
+  // Offscreen bg canvas: the bg Shape below draws the transformed background
+  // into this alongside the main stage, so GlassPanel can sample it 1:1
+  // and its blur matches the visible bg exactly. Sized to logicalW/H so a
+  // panel-rotate resizes it too.
+  const bgCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  if (!bgCanvasRef.current) bgCanvasRef.current = document.createElement('canvas')
+  if (bgCanvasRef.current.width !== logicalW) bgCanvasRef.current.width = logicalW
+  if (bgCanvasRef.current.height !== logicalH) bgCanvasRef.current.height = logicalH
   const bgEnv: BgEnv = {
     el: bgEl ?? null,
     color: layout.bgColor,
@@ -372,6 +380,7 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
     dim: layout.bgDim ?? 0,
     panelW: logicalW,
     panelH: logicalH,
+    bgCanvas: bgEl ? bgCanvasRef.current : null,
   }
 
   const snapDragMove = (id: string, e: Konva.KonvaEventObject<DragEvent>) => {
@@ -439,7 +448,8 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
           <Shape sceneFunc={(ctx) => {
             const blur = layout.bgBlur ?? 0
             const scale = layout.bgScale ?? 1
-            const rot = ((layout.bgRotate ?? 0) * Math.PI) / 180
+            const rotDeg = layout.bgRotate ?? 0
+            const rot = (rotDeg * Math.PI) / 180
             const flipX = layout.bgFlipX ? -1 : 1
             const flipY = layout.bgFlipY ? -1 : 1
             const offX = ((layout.bgOffsetX ?? 0) / 100) * logicalW
@@ -459,28 +469,48 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
             const sY = (cT / 100) * srcHFull
             const srcW = srcWFull * (1 - (cL + cR) / 100)
             const srcH = srcHFull * (1 - (cT + cB) / 100)
-            // "cover the panel" base fit; user's bgScale multiplies on top.
-            const baseFit = Math.max(logicalW / srcW, logicalH / srcH)
+            // "cover the panel" base fit. For arbitrary bgRotate the rotated
+            // source occupies (|cosθ|w + |sinθ|h) × (|sinθ|w + |cosθ|h) on
+            // the panel, so cover must fit that rotated AABB — otherwise
+            // 90°/270° rotations expose bgColor bands at the top/bottom.
+            const absCos = Math.abs(Math.cos(rot))
+            const absSin = Math.abs(Math.sin(rot))
+            const rotW = srcW * absCos + srcH * absSin
+            const rotH = srcW * absSin + srcH * absCos
+            const baseFit = Math.max(logicalW / rotW, logicalH / rotH)
             const drawW = srcW * baseFit * scale
             const drawH = srcH * baseFit * scale
 
-            const c2 = ctx._context
-            c2.save()
-            // Clip to panel so rotation/zoom overflow doesn't leak into the
-            // stage bounds where widgets live.
-            c2.beginPath()
-            c2.rect(0, 0, logicalW, logicalH)
-            c2.clip()
-            if (blur > 0) c2.filter = `blur(${blur}px)`
-            c2.translate(logicalW / 2 + offX, logicalH / 2 + offY)
-            c2.rotate(rot)
-            c2.scale(flipX, flipY)
-            if (sX || sY || srcW !== srcWFull || srcH !== srcHFull) {
-              c2.drawImage(bgEl, sX, sY, srcW, srcH, -drawW / 2, -drawH / 2, drawW, drawH)
-            } else {
-              c2.drawImage(bgEl, -drawW / 2, -drawH / 2, drawW, drawH)
+            const drawBg = (target: CanvasRenderingContext2D) => {
+              target.save()
+              // Clip to panel so rotation/zoom overflow doesn't leak into the
+              // stage bounds where widgets live.
+              target.beginPath()
+              target.rect(0, 0, logicalW, logicalH)
+              target.clip()
+              if (blur > 0) target.filter = `blur(${blur}px)`
+              target.translate(logicalW / 2 + offX, logicalH / 2 + offY)
+              target.rotate(rot)
+              target.scale(flipX, flipY)
+              if (sX || sY || srcW !== srcWFull || srcH !== srcHFull) {
+                target.drawImage(bgEl, sX, sY, srcW, srcH, -drawW / 2, -drawH / 2, drawW, drawH)
+              } else {
+                target.drawImage(bgEl, -drawW / 2, -drawH / 2, drawW, drawH)
+              }
+              target.restore()
             }
-            c2.restore()
+            drawBg(ctx._context)
+            // Mirror onto the offscreen canvas the same frame so GlassPanel
+            // sampling this frame matches what the user actually sees. Base
+            // color goes underneath in case the bg has transparency.
+            const off = bgCanvasRef.current
+            if (off) {
+              const oc = off.getContext('2d')!
+              oc.clearRect(0, 0, off.width, off.height)
+              oc.fillStyle = layout.bgColor
+              oc.fillRect(0, 0, off.width, off.height)
+              drawBg(oc)
+            }
           }} />
         )}
         {bgEl && (layout.bgDim ?? 0) > 0 && (
