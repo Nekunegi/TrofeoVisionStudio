@@ -12,6 +12,8 @@ Protocol (ws://localhost:8787):
                                       playing,pos,dur[,thumb]}}
     {"type":"spectrum",       "data":[float x96]}   # log-spaced audio bands
     {"type":"spectrumStatus", "status":"idle"|"ok"|"error: ..."}
+    {"type":"lcdfps",         "fps":float, "avgMs":float, "maxMs":float,
+                              "skipped":int}  # achieved USB frame rate (2s window)
   client -> server:
     binary message            = a JPEG frame (1920x480) to display on the LCD
     {"cmd":"spectrum", "on":bool, "hz":int}  # subscribe/unsubscribe audio bands
@@ -287,7 +289,6 @@ def _get_origin(ws) -> str | None:
 
 
 async def handler(ws):
-    global _frame_count
     origin = _get_origin(ws)
     if origin is not None and not LEGIT_ORIGIN.match(origin):
         print(f"[ws] rejecting cross-origin connect: {origin}", flush=True)
@@ -304,6 +305,80 @@ async def handler(ws):
     # (client disconnected mid-handshake) leaves CLIENTS with a dead ref.
     CLIENTS.add(ws)
     sensor_task = None
+    frame_task = None
+    # 1-slot mailbox: the USB link is the slowest stage of the pipeline, so
+    # frames must never queue behind it. The receive loop stays free to drain
+    # the socket (otherwise TCP backpressure builds ~seconds of latency and
+    # the client's buffered frames arrive in stale bursts = visible judder);
+    # a frame arriving while the USB write is busy simply replaces the one
+    # waiting here, keeping worst-case latency at one frame.
+    latest_frame: list = [None]
+    frame_evt = asyncio.Event()
+    skipped = [0]  # frames replaced in the mailbox before reaching the USB
+
+    async def frame_sender():
+        global _frame_count
+        dump_path = os.environ.get("TROFEO_DUMP")
+        sent = 0
+        busy_ms = 0.0
+        max_ms = 0.0
+        win_start = time.perf_counter()
+        log_busy_ms = 0.0
+        log_max_ms = 0.0
+        log_sent = 0
+        while True:
+            await frame_evt.wait()
+            frame_evt.clear()
+            frame = latest_frame[0]
+            latest_frame[0] = None
+            if frame is None:
+                continue
+            t0 = time.perf_counter()
+            try:
+                await loop.run_in_executor(None, device.send_frame, frame)
+            except Exception as e:
+                print(f"[device] frame send failed: {e}", flush=True)
+                await report("disconnected", str(e))
+                continue
+            dt = (time.perf_counter() - t0) * 1000.0
+            _frame_count += 1
+            sent += 1
+            busy_ms += dt
+            max_ms = max(max_ms, dt)
+            log_sent += 1
+            log_busy_ms += dt
+            log_max_ms = max(log_max_ms, dt)
+            if dump_path and _frame_count % 100 == 0:
+                # eyes-free debugging: keep the latest delivered frame on disk
+                with open(dump_path, "wb") as f:
+                    f.write(frame)
+            if _frame_count % 100 == 0 and log_sent:
+                print(f"frames delivered to LCD: {_frame_count} "
+                      f"(last {len(frame)} B, usb avg {log_busy_ms / log_sent:.1f} ms "
+                      f"max {log_max_ms:.1f} ms, {skipped[0]} stale skipped)", flush=True)
+                log_sent = 0
+                log_busy_ms = 0.0
+                log_max_ms = 0.0
+            now = time.perf_counter()
+            if now - win_start >= 2.0:
+                # Tell the sender what the panel actually achieves — the
+                # editor shows this instead of its own send-rate estimate.
+                try:
+                    await ws.send(json.dumps({
+                        "type": "lcdfps",
+                        "fps": round(sent / (now - win_start), 1),
+                        "avgMs": round(busy_ms / sent, 1),
+                        "maxMs": round(max_ms, 1),
+                        "skipped": skipped[0],
+                    }))
+                except Exception:
+                    pass
+                win_start = now
+                sent = 0
+                busy_ms = 0.0
+                max_ms = 0.0
+                skipped[0] = 0
+
     try:
         await ws.send(json.dumps({"type": "notifyStatus", "status": notifier.status}))
         snap = media.snapshot()
@@ -317,22 +392,13 @@ async def handler(ws):
             await report("disconnected", str(e))
 
         sensor_task = asyncio.create_task(sensor_loop(ws))
-        dump_path = os.environ.get("TROFEO_DUMP")
+        frame_task = asyncio.create_task(frame_sender())
         async for message in ws:
             if isinstance(message, bytes):
-                try:
-                    await loop.run_in_executor(None, device.send_frame, message)
-                    _frame_count += 1
-                    if dump_path and _frame_count % 100 == 0:
-                        # eyes-free debugging: keep the latest delivered frame on disk
-                        with open(dump_path, "wb") as f:
-                            f.write(message)
-                    if _frame_count % 10 == 0:
-                        print(f"frames delivered to LCD: {_frame_count} "
-                              f"(last {len(message)} B)", flush=True)
-                except Exception as e:
-                    print(f"[device] frame send failed: {e}", flush=True)
-                    await report("disconnected", str(e))
+                if latest_frame[0] is not None:
+                    skipped[0] += 1
+                latest_frame[0] = message
+                frame_evt.set()
             else:
                 # text = JSON command from the editor
                 if len(message) > MAX_TEXT_MSG:
@@ -359,6 +425,12 @@ async def handler(ws):
     finally:
         CLIENTS.discard(ws)
         SPECTRUM_SUBS.pop(ws, None)
+        if frame_task is not None:
+            frame_task.cancel()
+            try:
+                await asyncio.wait_for(frame_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
         if sensor_task is not None:
             sensor_task.cancel()
             # Wait so the executor-bound sensor read can't outlive us and

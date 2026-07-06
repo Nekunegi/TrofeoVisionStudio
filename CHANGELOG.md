@@ -6,6 +6,40 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-07-06
+
+### Fixed
+- **Choppy playback at 30/60 fps and occasional frame drops on Auto**
+  (user report). Two root causes, both fixed:
+  - The LCD capture ran on its own timer, independent of the animation.
+    Sampling a 20 fps GIF with a free-running 30/60 fps clock duplicates
+    and skips source frames on a drifting beat (3:2-pulldown-style
+    judder), and even the matched 20/20 case slid in and out of phase.
+    Capture is now **driven by the canvas redraw itself** (Konva layer
+    `draw` event, throttled at the Max fps ceiling): every animation
+    frame is sent exactly once, when it is drawn. Measured on a 20 fps
+    GIF: Auto = 20.0 fps with 50.0 ms ± 2.7 ms spacing and zero
+    outliers; a 60 fps ceiling no longer force-resamples to 60 — the
+    stream follows the source.
+  - The backend pushed every incoming frame to the USB panel in arrival
+    order. When the requested rate exceeded what the USB link sustains,
+    frames queued up (seconds of latency) and then dropped in bursts.
+    Frames now go through a **latest-frame-wins mailbox**: the socket is
+    drained eagerly, stale frames are skipped, and the panel always
+    shows the newest frame at whatever rate the hardware achieves
+    (verified: 60 fps in → 25 fps capacity out = clean 24.6 fps, last
+    frame always current).
+- Stream rate no longer flip-flops between the animation rate and the
+  Max fps ceiling ~once a second while sensor values ease (another
+  judder source at 30/60).
+
+### Added
+- The backend measures the real USB frame rate / transfer time and
+  reports it to the editor every 2 s (`lcdfps` message); the header's
+  "out" figure now shows what the panel actually displays, not just
+  what the editor sends. `backend.log` gains `usb avg/max ms` and
+  stale-skip counts (every 100th frame) for diagnosing panel capacity.
+
 ## [1.11.8] — 2026-07-06
 
 ### Changed

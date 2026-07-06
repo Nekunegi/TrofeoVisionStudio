@@ -119,7 +119,7 @@ export default function App() {
   const logicalH = isPortrait ? PANEL_W : PANEL_H
 
   // Smoothed sensor values drive the LCD widgets (raw 1Hz values feed history).
-  const { display: displaySensors, animating: sensorsAnimating } = useSmoothedSensors(backend.sensors)
+  const { display: displaySensors } = useSmoothedSensors(backend.sensors)
 
   // --- Windows toast overlay ------------------------------------------------
   const TOAST_MS = 8000
@@ -147,14 +147,8 @@ export default function App() {
   // The backend delivers frames at the fps ceiling so 60fps mode is real 60.
   const hasVisualizer = layout.widgets.some((w) => w.type === 'visualizer')
   const vizHz = Math.max(15, Math.min(60, fpsCeiling))
-  const { bands: spectrum, active: audioActive, error: vizError } =
+  const { bands: spectrum, error: vizError } =
     useAudioSpectrum(hasVisualizer, backend, vizHz)
-
-  // Adaptive stream rate: idle static layouts stay at 1fps, but anything in
-  // motion (toast slide/fade, sensor easing, audio bars) streams at animation speed.
-  const streamFps = (toasts.length || sensorsAnimating || audioActive)
-    ? Math.max(targetFps, fpsCeiling)
-    : targetFps
 
   // Canvas text never triggers @font-face downloads — force-load the LCD fonts,
   // then re-render so Konva redraws (and re-measures) with the real glyphs.
@@ -247,39 +241,48 @@ export default function App() {
   // Reused offscreen canvas for the panel-rotation compositing (editor stays
   // in logical coords; this canvas is the physical 1920×480 hardware buffer).
   const rotCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  // Keep dynamic scheduling parameters in refs so we can read the latest
-  // value inside a long-lived setTimeout chain WITHOUT tearing down the loop
-  // every time streamFps flips (which happens 20+ times/sec as sensors ease).
-  const streamFpsRef = useRef(streamFps)
+  // Keep dynamic parameters in refs so the long-lived capture pipeline reads
+  // the latest value without re-running the effect on every render.
+  const fpsCeilingRef = useRef(fpsCeiling)
   const panelRotateRef = useRef<0 | 90 | 180 | 270>(panelRotate)
   const linkRef = useRef(backend.link)
-  streamFpsRef.current = streamFps
+  fpsCeilingRef.current = fpsCeiling
   panelRotateRef.current = panelRotate
   linkRef.current = backend.link
 
   useEffect(() => {
     if (!streaming) return
+    // Draw-driven capture: the LCD gets a frame when (and only when) the
+    // content layer actually redrew — GIF flip, sensor easing, toast motion,
+    // visualizer bands, editor drags. A free-running timer here caused the
+    // long-standing judder: sampling a 20fps GIF with an independent 30/60fps
+    // clock duplicates/skips source frames on a drifting beat, and even at a
+    // matched 20/20 the two clocks slid past each other (periodic dropped
+    // frame). Phase-locking capture to the redraw removes the beat entirely;
+    // fpsCeiling only acts as a throttle.
+    let cancelled = false
     // measuredFps is a rolling 1-second window (frames emitted / window
     // duration), not a cumulative session average — otherwise a rate change
     // (5→60) takes tens of seconds to converge and any earlier stall gets
     // baked into the reported number forever.
     let winStart = performance.now()
     let winFrames = 0
-    let cancelled = false
-    let handle: ReturnType<typeof setTimeout> | null = null
+    let lastCap = 0        // when the last capture started (throttle anchor)
+    let dirty = false      // a redraw happened since the last capture
+    let encoding = false   // JPEG encode in flight — captures are serialized
+    let trailing: ReturnType<typeof setTimeout> | null = null
 
-    const tick = () => {
-      if (cancelled) return
+    const capture = () => {
       const stage = stageRef.current
-      if (!stage) { handle = setTimeout(tick, 100); return }
+      if (!stage) return
+      lastCap = performance.now()
       // Skip encoding entirely if the backend socket is dead — sendFrame
-      // would silently drop the bytes anyway. Poll at 1Hz to catch reconnect.
-      // Reset the rolling window so downtime doesn't drag the reported fps
-      // down for a full window after reconnect.
+      // would drop the bytes anyway. The keepalive below pushes a frame
+      // shortly after reconnect. Reset the rolling window so downtime
+      // doesn't drag the reported fps down after reconnect.
       if (linkRef.current !== 'open') {
         winStart = performance.now()
         winFrames = 0
-        handle = setTimeout(tick, 1000)
         return
       }
       const l = layoutRef.current
@@ -331,9 +334,10 @@ export default function App() {
       }
       ctx.restore()
 
-      const emitAt = performance.now()
       const deliver = (bytes: Uint8Array<ArrayBuffer>) => {
-        sendFrame(bytes)
+        // Count only frames the socket accepted — backpressure drops must not
+        // inflate the reported rate.
+        if (!sendFrame(bytes)) return
         const p = performance.now()
         winFrames++
         if (p - winStart >= 1000) {
@@ -342,15 +346,8 @@ export default function App() {
           winFrames = 0
         }
       }
-      // Self-schedule the next tick against the CURRENT streamFps target.
-      // Reading through a ref avoids the effect-teardown thrash that
-      // happens whenever sensors flip sensorsAnimating on/off. No fixed
-      // floor: at 60fps the ideal period is 17ms; a 15ms floor would
-      // cap actual output at ~50fps once encoding takes 2ms.
-      const scheduleNext = () => {
-        const nextIn = Math.round(1000 / streamFpsRef.current) - (performance.now() - emitAt)
-        if (!cancelled) handle = setTimeout(tick, Math.max(0, nextIn))
-      }
+      encoding = true
+      const done = () => { encoding = false; pump() }
       if (compositorStalled()) {
         // Hidden window (tray-resident logon start): Chromium schedules the
         // async encoders (toBlob / OffscreenCanvas.convertToBlob) as idle
@@ -363,7 +360,7 @@ export default function App() {
         const bytes = new Uint8Array(bin.length)
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
         deliver(bytes)
-        scheduleNext()
+        done()
       } else {
         rc.toBlob(async (blob) => {
           if (cancelled) return
@@ -372,12 +369,56 @@ export default function App() {
             if (cancelled) return
             deliver(new Uint8Array(buf))
           }
-          scheduleNext()
+          done()
         }, 'image/jpeg', 0.72)
       }
     }
-    handle = setTimeout(tick, 0)
-    return () => { cancelled = true; if (handle) clearTimeout(handle) }
+
+    // Throttle-with-trailing at the fps ceiling: a redraw inside the
+    // min-interval isn't dropped, it's captured the moment the interval
+    // elapses (the canvas then holds the newest content). The 4ms tolerance
+    // absorbs timer jitter so a 20fps GIF against a 20fps ceiling never
+    // defers a whole extra period.
+    const pump = () => {
+      if (cancelled || !dirty || encoding) return
+      const minInterval = 1000 / Math.max(1, fpsCeilingRef.current)
+      const wait = lastCap + minInterval - performance.now()
+      if (wait > 4) {
+        if (!trailing) trailing = setTimeout(() => { trailing = null; pump() }, wait)
+        return
+      }
+      dirty = false
+      capture()
+      if (!encoding) pump() // capture bailed (no stage / link down) — don't stall
+    }
+    const onDraw = () => { dirty = true; pump() }
+
+    // The content layer persists (Stage has no key), but re-bind defensively
+    // from the keepalive in case react-konva ever recreates it.
+    let boundLayer: Konva.Layer | null = null
+    const bind = () => {
+      const layer = stageRef.current?.getLayers()[0] ?? null
+      if (layer === boundLayer) return
+      boundLayer?.off('draw.stream')
+      boundLayer = layer
+      layer?.on('draw.stream', onDraw)
+    }
+    bind()
+    onDraw() // first frame right away
+
+    // ~1Hz keepalive: fully-static scenes and backend reconnects still get a
+    // frame even though nothing redraws.
+    const keep = setInterval(() => {
+      bind()
+      if (performance.now() - lastCap > 1000) { dirty = true; pump() }
+    }, 250)
+
+    return () => {
+      cancelled = true
+      clearInterval(keep)
+      if (trailing) clearTimeout(trailing)
+      boundLayer?.off('draw.stream')
+    }
   }, [streaming, sendFrame])
 
   const selected = useMemo(
@@ -556,7 +597,9 @@ export default function App() {
         <div className="head-right">
           <span className="fpsinfo">
             {t('header.target')} <b>{targetFps} fps</b> ({bgFps ? t('header.animatedBg') : t('header.staticBg')})
-            {measuredFps > 0 && streaming && <> · {t('header.out')} <b>{measuredFps} fps</b></>}
+            {measuredFps > 0 && streaming && <> · {t('header.out')}{' '}
+              <b>{backend.lcdStats && Date.now() - backend.lcdStats.at < 5000
+                ? backend.lcdStats.fps : measuredFps} fps</b></>}
           </span>
           <label className="fpsmax">{t('header.maxFps')}
             <select value={String(maxFps)} onChange={(e) => {

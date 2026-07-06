@@ -35,7 +35,11 @@ export interface Backend {
   // Latest visualizer bands from the backend loopback capture + its status.
   spectrumFrame: { bands: number[]; at: number } | null
   spectrumStatus: string
-  sendFrame: (bytes: Uint8Array<ArrayBuffer>) => void
+  // What the panel actually achieves over USB (2s window), or null until the
+  // backend reports one. `at` lets consumers ignore stale reports.
+  lcdStats: { fps: number; avgMs: number; maxMs: number; skipped: number; at: number } | null
+  // Returns false when the frame was dropped (socket closed / backpressure).
+  sendFrame: (bytes: Uint8Array<ArrayBuffer>) => boolean
   // Send a JSON command to the backend (e.g. spectrum subscribe).
   sendCmd: (cmd: Record<string, unknown>) => void
 }
@@ -51,6 +55,8 @@ export function useBackend(): Backend {
   const [media, setMedia] = useState<MediaState | null>(null)
   const [spectrumFrame, setSpectrumFrame] = useState<{ bands: number[]; at: number } | null>(null)
   const [spectrumStatus, setSpectrumStatus] = useState('unknown')
+  const [lcdStats, setLcdStats] =
+    useState<{ fps: number; avgMs: number; maxMs: number; skipped: number; at: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -99,6 +105,11 @@ export function useBackend(): Backend {
           setSpectrumFrame({ bands: msg.data as number[], at: Date.now() })
         } else if (msg.type === 'spectrumStatus') {
           setSpectrumStatus(msg.status ?? 'unknown')
+        } else if (msg.type === 'lcdfps') {
+          setLcdStats({
+            fps: +msg.fps || 0, avgMs: +msg.avgMs || 0, maxMs: +msg.maxMs || 0,
+            skipped: +msg.skipped || 0, at: Date.now(),
+          })
         }
       }
       ws.onclose = () => {
@@ -119,6 +130,7 @@ export function useBackend(): Backend {
         setNotifyStatus('unknown')
         setSpectrumStatus('unknown')
         setSpectrumFrame(null)
+        setLcdStats(null)
         retry = setTimeout(connect, 1500)
       }
       ws.onerror = () => ws.close()
@@ -134,11 +146,13 @@ export function useBackend(): Backend {
 
   const sendFrame = useCallback((bytes: Uint8Array<ArrayBuffer>) => {
     const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    // Backpressure: if the backend stalls (USB retry etc.), drop frames instead
-    // of queueing them without bound in the socket buffer.
-    if (ws.bufferedAmount > 3 * 1024 * 1024) return
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
+    // Backpressure: the backend drains the socket eagerly and skips stale
+    // frames itself, so a growing buffer means it is stalled or gone — drop
+    // instead of queueing seconds of latency. ~1MB is a handful of frames.
+    if (ws.bufferedAmount > 1024 * 1024) return false
     ws.send(bytes)
+    return true
   }, [])
 
   const sendCmd = useCallback((cmd: Record<string, unknown>) => {
@@ -186,6 +200,6 @@ export function useBackend(): Backend {
 
   return {
     link, device, deviceDetail, sensors, notification, notifyStatus, media,
-    spectrumFrame, spectrumStatus, sendFrame, sendCmd,
+    spectrumFrame, spectrumStatus, lcdStats, sendFrame, sendCmd,
   }
 }
