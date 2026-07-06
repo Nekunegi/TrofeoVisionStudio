@@ -6,6 +6,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.8] — 2026-07-06
+
+### Changed
+- **Quieter header** (user request): removed the brand logo icon and the
+  undo/redo buttons added in 1.11.6. Undo/redo remain on Ctrl+Z / Ctrl+Y
+  (listed in the Selection panel's shortcut hints).
+- **Editor fits one screen without scrolling, both panel orientations**
+  (user request). Landscape: the preview height is now computed from the
+  live window height minus the actual inspector masonry height (was a
+  fixed 420px cap), so preview + cards always share the window.
+  Tightened main paddings/gaps, palette buttons, masonry column width
+  (260→230, fits 3 columns even in the default 1100px window) and the
+  side panel (302→288). Verified 0px overflow at 1100×900 in both
+  landscape and portrait.
+- Slider labels no longer wrap mid-word in narrow columns.
+
 ## [1.11.7] — 2026-07-06
 
 ### Fixed

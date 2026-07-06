@@ -3,7 +3,7 @@ import type Konva from 'konva'
 import {
   Upload, RotateCcw, MonitorCog, Palette,
   MousePointerClick, Bookmark, Zap, Copy, BringToFront, SendToBack, Bell,
-  Layers, Undo2, Redo2,
+  Layers,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from 'lucide-react'
@@ -90,6 +90,7 @@ export default function App() {
 
   const stageRef = useRef<Konva.Stage>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const inspectorRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.5)
   const { frame: bgEl, fps: bgFps } = useAnimatedImage(layout.bgImage)
   // User-set fps ceiling ('auto' = the classic 20fps animation cap). The
@@ -208,35 +209,38 @@ export default function App() {
   useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el) return
-    // Height cap tuned per orientation:
-    //   landscape (480 tall) — 420px slice keeps the widgets from dominating
-    //     the window; inspector sits below it.
-    //   portrait (1920 tall) — 420 is way too small (a 105×420 stripe).
-    //     Inspector sits BESIDE the preview so we can use most of the
-    //     window height. Read the actual body height to cap dynamically.
     const bodyEl = document.querySelector('.body') as HTMLElement | null
-    const maxH = isPortrait
-      ? Math.max(500, (bodyEl?.clientHeight ?? 900) - 60)
-      : 420
+    // Height cap tuned per orientation, both derived from the live body
+    // height so preview + inspector fit ONE screen without page scroll:
+    //   landscape (480 tall) — whatever height remains after the inspector
+    //     masonry below (its height is static while editing since the
+    //     volatile sections live in the .side panel). ~80px covers main
+    //     paddings + device bezel + flex gap.
+    //   portrait (1920 tall) — inspector sits BESIDE the preview, so the
+    //     strip can use most of the window height.
+    const maxCanvasH = () => {
+      const bodyH = bodyEl?.clientHeight ?? 900
+      if (isPortrait) return Math.max(500, bodyH - 60)
+      const inspH = inspectorRef.current?.offsetHeight ?? 0
+      return Math.max(160, Math.min(420, bodyH - inspH - 68))
+    }
     // clientWidth of the wrap is set from the current scale, so use the
     // parent (.device) which is not scaled by our own output.
     const parent = el.parentElement
     const fit = () => {
       const w = parent ? parent.clientWidth : el.clientWidth
-      const h = isPortrait
-        ? Math.max(500, (bodyEl?.clientHeight ?? 900) - 60)
-        : 420
-      const s = Math.min(1, w / logicalW, h / logicalH)
+      const s = Math.min(1, w / logicalW, maxCanvasH() / logicalH)
       setScale(s)
     }
     // Watch the PARENT for width changes — our own wrap width is derived
-    // from scale, so observing it would loop.
+    // from scale, so observing it would loop. The inspector is observed
+    // because its masonry height decides the landscape canvas budget (its
+    // height does not depend on the canvas, so this cannot loop either).
     const ro = new ResizeObserver(fit)
-    const availW = parent ? parent.clientWidth : el.clientWidth
-    const s = Math.min(1, availW / logicalW, maxH / logicalH)
-    setScale(s)
+    fit()
     if (parent) ro.observe(parent)
     if (bodyEl) ro.observe(bodyEl)
+    if (inspectorRef.current) ro.observe(inspectorRef.current)
     return () => ro.disconnect()
   }, [logicalW, logicalH, isPortrait])
 
@@ -538,7 +542,6 @@ export default function App() {
       <FirstRunWizard backend={backend} />
       <header>
         <div className="brand">
-          <img className="logo" src="/favicon.svg" alt="" />
           <b>Trofeo Vision <small>STUDIO</small></b>
           <span className="ver">v{pkg.version}</span>
         </div>
@@ -550,18 +553,6 @@ export default function App() {
         <span className={`pill ${backend.device === 'connected' ? 'open' : 'closed'}`}>
           <span className="dot" />{backend.device === 'connected' ? t('lcd.connected') : t('lcd.notFound')}
         </span>
-        <div className="hist">
-          <button className="iconbtn" onClick={undo}
-            disabled={past.current.length === 0}
-            title={`${t('header.undo')} (Ctrl+Z)`}>
-            <Undo2 size={14} />
-          </button>
-          <button className="iconbtn" onClick={redo}
-            disabled={future.current.length === 0}
-            title={`${t('header.redo')} (Ctrl+Y)`}>
-            <Redo2 size={14} />
-          </button>
-        </div>
         <div className="head-right">
           <span className="fpsinfo">
             {t('header.target')} <b>{targetFps} fps</b> ({bgFps ? t('header.animatedBg') : t('header.staticBg')})
@@ -625,7 +616,7 @@ export default function App() {
             </motion.div>
           </motion.div>
 
-          <motion.div className="inspector" layout="position"
+          <motion.div className="inspector" ref={inspectorRef} layout="position"
             transition={{ type: 'spring', stiffness: 260, damping: 30 }}>
           <section>
             <h3><Zap size={13} />{t('section.addWidget')}</h3>

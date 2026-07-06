@@ -52,13 +52,6 @@ header {
   gap: 10px;
   margin-right: 10px;
 }
-.brand .logo {
-  width: 26px;
-  height: 26px;
-  display: block;
-  border-radius: 7px;
-  box-shadow: 0 0 14px rgba(77, 225, 255, 0.3);
-}
 .brand b {
   font-size: 14px;
   font-weight: 600;
@@ -105,23 +98,6 @@ header {
 .pill.connecting { color: var(--warn); border-color: rgba(255, 200, 97, 0.25); background: rgba(255, 200, 97, 0.08); }
 .pill.connecting .dot { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
-
-/* undo / redo cluster (header, after the status pills) */
-.hist { display: inline-flex; gap: 6px; }
-.iconbtn {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--sub);
-}
-.iconbtn svg { margin: 0; }
-.iconbtn:hover { color: var(--text); }
 
 button:disabled, .filebtn:disabled {
   opacity: 0.4;
@@ -205,11 +181,11 @@ button:disabled, .filebtn:disabled {
 
 main {
   flex: 1;
-  padding: 18px 20px 22px;
+  padding: 14px 16px 16px;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -373,7 +349,7 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
    sections (Selection, Layers) live in the pinned .side panel, so the
    auto-balancing here never reflows while editing. */
 .inspector {
-  column-width: 260px;
+  column-width: 230px;
   column-gap: 12px;
 }
 
@@ -402,10 +378,10 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
    masonry below the canvas. */
 .side {
   flex: none;
-  width: 302px;
+  width: 288px;
   min-width: 0;
   overflow-y: auto;
-  padding: 18px 16px 22px 0;
+  padding: 14px 14px 16px 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -695,7 +671,7 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 .palette-search input::-webkit-search-cancel-button { cursor: pointer; }
 
 /* palette category rows */
-.palette-cat + .palette-cat { margin-top: 12px; }
+.palette-cat + .palette-cat { margin-top: 9px; }
 .palette-cat-label {
   color: var(--sub);
   font-size: 10.5px;
@@ -716,9 +692,9 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 10px 4px;
-  min-height: 58px;
+  gap: 5px;
+  padding: 8px 4px;
+  min-height: 48px;
   line-height: 1.1;
   text-align: center;
   background: var(--bg-input);
@@ -789,7 +765,7 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
   color: var(--sub);
   font-size: 12px;
 }
-.row .lbl { color: var(--sub); font-size: 12px; min-width: 44px; }
+.row .lbl { color: var(--sub); font-size: 12px; min-width: 44px; white-space: nowrap; }
 .row .val {
   color: var(--faint);
   font-size: 11.5px;
