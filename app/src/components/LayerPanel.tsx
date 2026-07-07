@@ -62,13 +62,14 @@ export function LayerPanel({
             draggable
             onDragStart={(e) => {
               setDragId(w.id)
-              e.dataTransfer.effectAllowed = 'move'
+              // dataTransfer is absent in jsdom (tests) — guard, don't assume
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
             }}
             onDragEnd={() => { setDragId(null); setOverIdx(null) }}
             onDragOver={(e) => {
               if (!dragId || dragId === w.id) return
               e.preventDefault()
-              e.dataTransfer.dropEffect = 'move'
+              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
               setOverIdx(rowIdx)
             }}
             onDrop={(e) => {
