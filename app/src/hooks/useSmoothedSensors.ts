@@ -4,11 +4,22 @@ import { EMPTY_SENSORS, type SensorMetric, type Sensors } from '../types'
 // Eases displayed sensor values toward the 1Hz backend readings so gauges,
 // bars and numerals glide instead of stepping. Re-renders only while a
 // transition is in flight; `animating` lets the stream loop raise its fps.
-export function useSmoothedSensors(target: Sensors): { display: Sensors; animating: boolean } {
+//
+// maxFps caps the state-push rate. Without it the loop pushed at the full
+// rAF rate (85fps hidden via the shim, up to the monitor refresh visible),
+// and every push is a full App re-render + Konva layer redraw — measured at
+// ~1.3 cores of continuous CPU. The LCD can only display fpsCeiling frames,
+// so easing steps beyond that are invisible; capping them cuts the cost
+// without changing the glide trajectory (dt-based exponential).
+export function useSmoothedSensors(
+  target: Sensors, maxFps = 30,
+): { display: Sensors; animating: boolean } {
   const [display, setDisplay] = useState<Sensors>(target)
   const [animating, setAnimating] = useState(false)
   const targetRef = useRef(target)
   targetRef.current = target
+  const maxFpsRef = useRef(maxFps)
+  maxFpsRef.current = maxFps
   const dispRef = useRef<Sensors>(target)
   const rafRef = useRef(0)
 
@@ -33,6 +44,13 @@ export function useSmoothedSensors(target: Sensors): { display: Sensors; animati
 
     let last = performance.now()
     const tick = (t: number) => {
+      // Skip rAF ticks that arrive faster than the push cap — dt accumulates
+      // across skipped ticks, so the eased values land in the same place.
+      const minInterval = 1000 / Math.max(1, maxFpsRef.current)
+      if (t - last < minInterval - 1) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
       const dt = Math.min(0.1, (t - last) / 1000)
       last = t
       const c = dispRef.current

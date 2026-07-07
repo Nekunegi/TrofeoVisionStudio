@@ -94,7 +94,9 @@ export default function App() {
   const logicalH = isPortrait ? panelW : panelH
 
   // Smoothed sensor values drive the LCD widgets (raw 1Hz values feed history).
-  const { display: displaySensors } = useSmoothedSensors(backend.sensors)
+  // Easing pushes are capped at the stream ceiling — steps beyond what the
+  // LCD can display are invisible and were burning ~1.3 cores (measured).
+  const { display: displaySensors } = useSmoothedSensors(backend.sensors, fpsCeiling)
 
   // Keep every widget reachable when the logical canvas shrinks underneath
   // the layout — the panel size self-report arriving from the backend (1280

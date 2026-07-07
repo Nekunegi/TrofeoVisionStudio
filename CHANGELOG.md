@@ -6,6 +6,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.14.1] — 2026-07-07
+
+### Fixed
+- **~3x lower CPU while sensor values animate.** The value-easing loop pushed
+  a full re-render + canvas redraw at the raw rAF rate (85–144/s) even though
+  the LCD can only display up to the Max fps ceiling. Easing updates are now
+  capped at that ceiling. Measured (Electron total, one-core %): static
+  dashboard with live sensors 138% → 44%; 20 fps GIF background 110% → 85%.
+  The glide animation itself is unchanged (same dt-based trajectory).
+
 ## [1.14.0] — 2026-07-07
 
 ### Added
