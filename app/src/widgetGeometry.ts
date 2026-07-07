@@ -1,4 +1,14 @@
-import type { Widget } from './types'
+import type { Layout, Widget } from './types'
+
+// UI-facing panel rotation with legacy-scheme migration: pre-v2 layouts
+// stored the HARDWARE angle, where 180 was the default (the panel is
+// physically mounted 180° out). +180 (mod 360) converts to the v2
+// user-facing scheme where 0 = correctly mounted.
+export function layoutPanelRotate(l: Layout): 0 | 90 | 180 | 270 {
+  return l.panelRotateScheme === 'v2'
+    ? (l.panelRotate ?? 0)
+    : ((((l.panelRotate ?? (l.rotate180 === false ? 0 : 180)) + 180) % 360) as 0 | 90 | 180 | 270)
+}
 
 // Approximate widget bounding box in logical pixels. Used when clamping
 // widget positions after a panel-rotate aspect flip (widgets sized for

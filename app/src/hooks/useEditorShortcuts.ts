@@ -7,7 +7,7 @@ export interface EditorShortcutArgs {
   del: () => void
   duplicate: () => void
   nudge: (dx: number, dy: number) => void
-  selectedIdRef: RefObject<string | null>
+  selectedIdsRef: RefObject<string[]>
 }
 
 /** Keyboard shortcuts: arrows nudge (Shift = 10px), Delete removes,
@@ -16,7 +16,7 @@ export interface EditorShortcutArgs {
  * modal owns keyboard focus and any Delete/Ctrl+Z hitting through to the
  * underlying layout would silently destroy work. */
 export function useEditorShortcuts(args: EditorShortcutArgs) {
-  const { undo, redo, del, duplicate, nudge, selectedIdRef } = args
+  const { undo, redo, del, duplicate, nudge, selectedIdsRef } = args
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Any modal open? Editor / wizard block the whole shortcut set.
@@ -26,7 +26,7 @@ export function useEditorShortcuts(args: EditorShortcutArgs) {
       const k = e.key.toLowerCase()
       if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return }
       if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return }
-      if (!selectedIdRef.current) return
+      if (!selectedIdsRef.current.length) return
       if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); duplicate(); return }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return }
       const step = e.shiftKey ? 10 : 1
@@ -36,5 +36,5 @@ export function useEditorShortcuts(args: EditorShortcutArgs) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, del, duplicate, nudge, selectedIdRef])
+  }, [undo, redo, del, duplicate, nudge, selectedIdsRef])
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Eye, EyeOff, Lock, Unlock, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
 import type { Widget } from '../types'
 import { useT } from '../i18n'
@@ -24,31 +25,60 @@ function widgetName(w: Widget): string {
 
 interface Props {
   widgets: Widget[]
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  selectedIds: string[]
+  // additive = Ctrl/Shift held: toggle the row in/out of the selection.
+  onSelect: (id: string | null, additive?: boolean) => void
   onUpdate: (id: string, patch: Partial<Widget>) => void
   onDelete: (id: string) => void
   // dir: 'up' = higher z (closer to viewer); 'down' = lower z.
   onReorder: (id: string, dir: 'up' | 'down') => void
+  // Drag & drop: move the widget to an absolute array index.
+  onReorderTo: (id: string, arrayIdx: number) => void
 }
 
 export function LayerPanel({
-  widgets, selectedId, onSelect, onUpdate, onDelete, onReorder,
+  widgets, selectedIds, onSelect, onUpdate, onDelete, onReorder, onReorderTo,
 }: Props) {
   const t = useT()
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
   if (!widgets.length) {
     return <p className="muted">{t('layers.empty')}</p>
   }
   // Show top-of-stack first (App renders widgets in array order — last = on top).
   const rows = widgets.slice().reverse()
+  // Display row i ↔ widget array index (rows are reversed).
+  const arrayIdxOf = (rowIdx: number) => widgets.length - 1 - rowIdx
   return (
     <ul className="layers">
-      {rows.map((w) => {
-        const active = w.id === selectedId
+      {rows.map((w, rowIdx) => {
+        const active = selectedIds.includes(w.id)
+        const cls = [
+          active ? 'active' : '',
+          overIdx === rowIdx && dragId && dragId !== w.id ? 'drag-over' : '',
+        ].filter(Boolean).join(' ')
         return (
-          <li key={w.id} className={active ? 'active' : ''}>
+          <li key={w.id} className={cls}
+            draggable
+            onDragStart={(e) => {
+              setDragId(w.id)
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragEnd={() => { setDragId(null); setOverIdx(null) }}
+            onDragOver={(e) => {
+              if (!dragId || dragId === w.id) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setOverIdx(rowIdx)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (dragId && dragId !== w.id) onReorderTo(dragId, arrayIdxOf(rowIdx))
+              setDragId(null)
+              setOverIdx(null)
+            }}>
             <button className="row-main" title={w.id}
-              onClick={() => onSelect(w.id)}>
+              onClick={(e) => onSelect(w.id, e.ctrlKey || e.shiftKey)}>
               <span className="type">{TYPE_LABEL[w.type]}</span>
               <span className="name">{widgetName(w)}</span>
             </button>

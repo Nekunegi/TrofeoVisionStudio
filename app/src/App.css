@@ -996,3 +996,59 @@ select:focus-visible {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 200, 97, 0.35); }
   50% { box-shadow: 0 0 0 5px rgba(255, 200, 97, 0); }
 }
+
+/* ---- context menu (canvas right-click) ---------------------------------- */
+.ctx-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 168px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--panel, #14161d);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+  animation: fadeUp 0.12s ease-out;
+}
+.ctx-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12.5px;
+}
+.ctx-menu button:hover { background: rgba(77, 225, 255, 0.10); }
+.ctx-menu button.danger { color: var(--err); }
+.ctx-menu button.danger:hover { background: rgba(255, 122, 138, 0.12); }
+
+/* ---- layers: hover-only delete + drag reorder --------------------------- */
+.layers li button.danger {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.layers li:hover button.danger,
+.layers li button.danger:focus-visible { opacity: 1; }
+.layers li { cursor: grab; }
+.layers li.drag-over { border-top: 2px solid var(--accent); }
+
+/* ---- preset thumbnails --------------------------------------------------- */
+.preset-item .name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preset-thumb {
+  flex: none;
+  width: 72px;
+  max-height: 34px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}

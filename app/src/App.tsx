@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type Konva from 'konva'
 import {
   Upload, RotateCcw, MonitorCog, Palette,
   MousePointerClick, Bookmark, Zap, Copy, BringToFront, SendToBack, Bell,
-  Layers,
+  Layers, Trash2,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from 'lucide-react'
@@ -15,7 +15,7 @@ import { IDB_BG, IDB_BG_VIDEO, saveBgMedia, saveBgVideo } from './bgStore'
 import { PANEL_W, PANEL_H, defaultLayout, type Sensors } from './types'
 import { LS_KEY } from './layoutStore'
 import { fileToDataUrl } from './imageUtils'
-import { remapWidgetForRotation, clampWidget } from './widgetGeometry'
+import { remapWidgetForRotation, clampWidget, layoutPanelRotate } from './widgetGeometry'
 import { LayoutGroup, motion } from 'motion/react'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
 import { useLayoutHistory } from './hooks/useLayoutHistory'
@@ -43,7 +43,18 @@ export default function App() {
   // the pipeline would be torn down before it ever fires).
   const { sendFrame } = backend
   const { layout, layoutRef, commit, undo, redo } = useLayoutHistory()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Multi-selection: widget ids in click order. Panels that only make sense
+  // for a single widget (WidgetProps etc.) use the derived `selected` below.
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const selectWidget = useCallback((id: string | null, additive = false) => {
+    if (id === null) { setSelectedIds([]); return }
+    setSelectedIds((prev) => additive
+      ? (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+      : [id])
+  }, [])
+  const selectMany = useCallback((ids: string[], additive = false) => {
+    setSelectedIds((prev) => (additive ? [...new Set([...prev, ...ids])] : ids))
+  }, [])
   const [now, setNow] = useState(new Date())
   const [streaming, setStreaming] = useState(true)
   const [measuredFps, setMeasuredFps] = useState(0)
@@ -73,12 +84,7 @@ export default function App() {
   //          so the hardware buffer gets a 180° flip when we emit)
   //   90  / 270 = portrait
   //   180 = upside-down from the user's POV
-  // Legacy schemes are migrated inline: pre-v2 stored the HARDWARE angle,
-  // where 180 was the default. Subtracting 180° (mod 360) converts to v2.
-  const panelRotate: 0 | 90 | 180 | 270 =
-    layout.panelRotateScheme === 'v2'
-      ? (layout.panelRotate ?? 0)
-      : (((((layout.panelRotate ?? (layout.rotate180 === false ? 0 : 180)) + 180) % 360)) as 0 | 90 | 180 | 270)
+  const panelRotate = layoutPanelRotate(layout)
   const isPortrait = panelRotate === 90 || panelRotate === 270
   // Physical panel size: self-reported by the device handshake (1280x480 on
   // the 6.86" model), constants until the backend reports one.
@@ -89,6 +95,28 @@ export default function App() {
 
   // Smoothed sensor values drive the LCD widgets (raw 1Hz values feed history).
   const { display: displaySensors } = useSmoothedSensors(backend.sensors)
+
+  // Keep every widget reachable when the logical canvas shrinks underneath
+  // the layout — the panel size self-report arriving from the backend (1280
+  // on the 6.86" model) or a rotation change. An out-of-bounds widget can't
+  // be clicked on the stage. Skips the initial mount so a session that never
+  // changes dims keeps intentional off-canvas placement untouched.
+  const prevDimsRef = useRef<string | null>(null)
+  useEffect(() => {
+    const key = `${logicalW}x${logicalH}`
+    const prev = prevDimsRef.current
+    prevDimsRef.current = key
+    if (prev === null || prev === key) return
+    commit((l) => {
+      let changed = false
+      const widgets = l.widgets.map((w) => {
+        const c = clampWidget(w, logicalW, logicalH)
+        if (c !== w) changed = true
+        return c
+      })
+      return changed ? { ...l, widgets } : l
+    })
+  }, [commit, logicalW, logicalH])
 
   // --- Windows toast overlay ------------------------------------------------
   const [notifyEnabled, setNotifyEnabled] = useState(
@@ -119,7 +147,7 @@ export default function App() {
   // main thread and pointlessly wears localStorage.
   const savedWarnedRef = useRef(false)
   useEffect(() => {
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       try {
         localStorage.setItem(LS_KEY, JSON.stringify(layout))
       } catch (e) {
@@ -128,13 +156,14 @@ export default function App() {
           pushToast({
             id: -Date.now(),
             app: 'Trofeo Vision Studio',
-            title: 'レイアウト保存失敗',
-            body: `localStorage の容量を超えました — 再起動でリセットされます (${e instanceof Error ? e.message : ''})`,
+            title: t('toast.saveFailTitle'),
+            body: `${t('toast.saveFailBody')} (${e instanceof Error ? e.message : ''})`,
           })
         }
       }
     }, 300)
-    return () => clearTimeout(t)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout, pushToast])
 
   useEffect(() => {
@@ -197,19 +226,61 @@ export default function App() {
     onMeasuredFps: setMeasuredFps,
   })
 
+  // Exactly-one selection — the single-widget panels key off this.
   const selected = useMemo(
-    () => layout.widgets.find((w) => w.id === selectedId) ?? null,
-    [layout, selectedId],
+    () => (selectedIds.length === 1
+      ? layout.widgets.find((w) => w.id === selectedIds[0]) ?? null
+      : null),
+    [layout, selectedIds],
   )
 
   // Widget mutations (add/move/resize/z-order/align/...), all routed through
   // the undo history's commit(). Stable callbacks — safe for the keyboard hook.
   const {
-    selectedIdRef, update, move, resize, addWidget, del, duplicate,
-    reorder, reorderOne, deleteById, align, nudge,
-  } = useWidgetOps({ commit, layoutRef, logicalW, logicalH, selectedId, setSelectedId })
+    selectedIdsRef, update, move, moveMany, resize, addWidget, del, duplicate,
+    reorder, reorderOne, reorderTo, deleteById, align, nudge,
+  } = useWidgetOps({ commit, layoutRef, logicalW, logicalH, selectedIds, setSelectedIds })
 
-  useEditorShortcuts({ undo, redo, del, duplicate, nudge, selectedIdRef })
+  useEditorShortcuts({ undo, redo, del, duplicate, nudge, selectedIdsRef })
+
+  // Right-click context menu (canvas widgets): fixed-position, closes on any
+  // outside press / Escape / window blur.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onPress = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.('.ctx-menu')) return
+      setCtxMenu(null)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtxMenu(null) }
+    const onBlur = () => setCtxMenu(null)
+    window.addEventListener('mousedown', onPress)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('mousedown', onPress)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [ctxMenu])
+
+  // Small JPEG snapshot of the LCD content layer for preset list thumbnails.
+  const captureThumb = useCallback(() => {
+    const layer = stageRef.current?.getLayers()[0]
+    if (!layer) return null
+    try {
+      return layer.toDataURL({
+        pixelRatio: Math.min(224 / logicalW, 224 / logicalH),
+        mimeType: 'image/jpeg', quality: 0.65,
+      })
+    } catch {
+      return null
+    }
+  }, [logicalW, logicalH])
+
+  // Two-step layout reset: first press arms for 3s, second press resets.
+  const [confirmReset, setConfirmReset] = useState(false)
+  const confirmResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   return (
     <div className="app">
@@ -229,7 +300,9 @@ export default function App() {
         </span>
         <div className="head-right">
           <span className="fpsinfo">
-            {t('header.target')} <b>{targetFps} fps</b> ({bgFps ? t('header.animatedBg') : t('header.staticBg')})
+            {bgFps
+              ? <>{t('header.target')} <b>{targetFps} fps</b> ({t('header.animatedBg')})</>
+              : t('header.onDraw')}
             {measuredFps > 0 && streaming && <> · {t('header.out')}{' '}
               <b>{backend.lcdStats && Date.now() - backend.lcdStats.at < 5000
                 ? backend.lcdStats.fps : measuredFps} fps</b></>}
@@ -283,10 +356,16 @@ export default function App() {
                   media={backend.media}
                   spectrum={spectrum}
                   editable
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  selectedIds={selectedIds}
+                  onSelect={selectWidget}
+                  onSelectMany={selectMany}
                   onMove={move}
+                  onMoveMany={moveMany}
                   onResize={resize}
+                  onWidgetMenu={(x, y) => setCtxMenu({
+                    x: Math.min(x, window.innerWidth - 190),
+                    y: Math.min(y, window.innerHeight - 190),
+                  })}
                 />
               </div>
             </motion.div>
@@ -460,15 +539,37 @@ export default function App() {
 
           <section>
             <h3><Bookmark size={13} />{t('section.presets')}</h3>
-            <Presets layout={layout} onLoad={(l) => { commit(() => l); setSelectedId(null) }} />
+            <Presets layout={layout} capture={captureThumb} onLoad={(l) => {
+              // Clamp imported coords against the dims THIS layout renders at —
+              // a layout exported on another panel/orientation may park
+              // widgets off-canvas where the stage can't select them.
+              const rot = layoutPanelRotate(l)
+              const lw = rot === 90 || rot === 270 ? panelH : panelW
+              const lh = rot === 90 || rot === 270 ? panelW : panelH
+              commit(() => ({ ...l, widgets: l.widgets.map((w) => clampWidget(w, lw, lh)) }))
+              setSelectedIds([])
+            }} />
           </section>
 
           <section>
-            <button className="wide" onClick={() => {
+            <button className={confirmReset ? 'wide danger' : 'wide'} onClick={() => {
+              if (!confirmReset) {
+                // Arm for 3s — a stray click must not wipe the layout.
+                setConfirmReset(true)
+                if (confirmResetTimer.current) clearTimeout(confirmResetTimer.current)
+                confirmResetTimer.current = setTimeout(() => setConfirmReset(false), 3000)
+                return
+              }
+              if (confirmResetTimer.current) clearTimeout(confirmResetTimer.current)
+              setConfirmReset(false)
               commit(() => defaultLayout()) // bg media kept in IDB so undo restores it
-              setSelectedId(null)
+              setSelectedIds([])
+              pushToast({
+                id: -Date.now(), app: 'Trofeo Vision Studio',
+                title: t('reset.doneTitle'), body: t('reset.doneBody'),
+              })
             }}>
-              <RotateCcw size={13} />{t('reset.layout')}
+              <RotateCcw size={13} />{confirmReset ? t('reset.confirm') : t('reset.layout')}
             </button>
           </section>
           </motion.div>
@@ -481,10 +582,12 @@ export default function App() {
           <section>
             <h3><MousePointerClick size={13} />{t('section.selection')}
               {selected && <span className="tag">{selected.type}</span>}
+              {selectedIds.length > 1 && <span className="tag">{selectedIds.length}</span>}
             </h3>
-            {!selected && (
+            {selectedIds.length === 0 && (
               <div className="hints">
                 <div className="hint"><kbd>{t('hint.keyClick')}</kbd><span>{t('hint.select')}</span></div>
+                <div className="hint"><kbd>{t('hint.keyShiftClick')}</kbd><span>{t('hint.multi')}</span></div>
                 <div className="hint"><kbd>← ↑ ↓ →</kbd><span>{t('hint.move')}</span></div>
                 <div className="hint"><kbd>Del</kbd><span>{t('hint.del')}</span></div>
                 <div className="hint"><kbd>Ctrl+D</kbd><span>{t('hint.dup')}</span></div>
@@ -492,7 +595,7 @@ export default function App() {
                 <div className="hint"><kbd>{t('hint.keyDrag')}</kbd><span>{t('hint.snap')}</span></div>
               </div>
             )}
-            {selected && (
+            {selectedIds.length > 0 && (
               <>
                 <div className="row actions">
                   <button onClick={duplicate}><Copy size={13} />{t('selection.copy')}</button>
@@ -512,7 +615,26 @@ export default function App() {
                     <button title={t('selection.alignBottom')} onClick={() => align('bottom')}><AlignEndHorizontal size={13} /></button>
                   </div>
                 </div>
+              </>
+            )}
+            {selectedIds.length > 1 && (
+              <>
+                <p className="muted">{selectedIds.length} {t('selection.multiCount')}</p>
+                <button className="wide danger" onClick={del}>
+                  <Trash2 size={13} />{t('layers.delete')}
+                </button>
+              </>
+            )}
+            {selected && (
+              <>
                 <WidgetProps w={selected} update={update} onDelete={del} />
+                {'metric' in selected && backend.link === 'open' &&
+                  backend.sensors[selected.metric] == null && (
+                  <p className="muted">
+                    {t('selection.metricNA')}
+                    {selected.metric === 'cpuTemp' ? ` ${t('selection.metricNACpu')}` : ''}
+                  </p>
+                )}
                 {selected.type === 'visualizer' && (
                   vizError ? (
                     <p className="muted">
@@ -530,11 +652,12 @@ export default function App() {
             <h3><Layers size={13} />{t('section.layers')} <span className="tag">{layout.widgets.length}</span></h3>
             <LayerPanel
               widgets={layout.widgets}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+              selectedIds={selectedIds}
+              onSelect={selectWidget}
               onUpdate={update}
               onDelete={deleteById}
               onReorder={reorderOne}
+              onReorderTo={reorderTo}
             />
           </section>
         </aside>
@@ -548,6 +671,22 @@ export default function App() {
           onCommit={(patch) => commit((l) => ({ ...l, ...patch }))}
           onClose={() => setBgEditorOpen(false)}
         />
+      )}
+      {ctxMenu && selectedIds.length > 0 && (
+        <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <button onClick={() => { duplicate(); setCtxMenu(null) }}>
+            <Copy size={13} />{t('selection.copy')}
+          </button>
+          <button onClick={() => { reorder('front'); setCtxMenu(null) }}>
+            <BringToFront size={13} />{t('selection.front')}
+          </button>
+          <button onClick={() => { reorder('back'); setCtxMenu(null) }}>
+            <SendToBack size={13} />{t('selection.back')}
+          </button>
+          <button className="danger" onClick={() => { del(); setCtxMenu(null) }}>
+            <Trash2 size={13} />{t('layers.delete')}
+          </button>
+        </div>
       )}
     </div>
   )

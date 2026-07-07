@@ -13,18 +13,20 @@ export interface WidgetOpsArgs {
   layoutRef: RefObject<Layout>
   logicalW: number
   logicalH: number
-  selectedId: string | null
-  setSelectedId: (id: string | null) => void
+  selectedIds: string[]
+  setSelectedIds: (ids: string[]) => void
 }
 
 /** All widget mutations (add/move/resize/z-order/align/…), routed through the
- * undo history's commit(). selectedIdRef mirrors selectedId so the returned
- * callbacks stay stable for keyboard-handler subscriptions. */
+ * undo history's commit(). Selection-wide ops (del/duplicate/align/nudge/
+ * front/back) apply to EVERY selected widget in a single undoable commit.
+ * selectedIdsRef mirrors the selection so the returned callbacks stay stable
+ * for keyboard-handler subscriptions. */
 export function useWidgetOps(args: WidgetOpsArgs) {
-  const { commit, layoutRef, logicalW, logicalH, selectedId, setSelectedId } = args
+  const { commit, layoutRef, logicalW, logicalH, selectedIds, setSelectedIds } = args
 
-  const selectedIdRef = useRef(selectedId)
-  selectedIdRef.current = selectedId
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
 
   const update = useCallback((id: string, patch: Partial<Widget>) => {
     commit((l) => ({
@@ -34,6 +36,19 @@ export function useWidgetOps(args: WidgetOpsArgs) {
   }, [commit])
 
   const move = useCallback((id: string, x: number, y: number) => update(id, { x, y }), [update])
+
+  // Group drag drop: every moved widget lands in ONE undoable commit.
+  const moveMany = useCallback((moves: { id: string; x: number; y: number }[]) => {
+    if (!moves.length) return
+    const byId = new Map(moves.map((m) => [m.id, m]))
+    commit((l) => ({
+      ...l,
+      widgets: l.widgets.map((w) => {
+        const m = byId.get(w.id)
+        return m ? { ...w, x: m.x, y: m.y } : w
+      }),
+    }))
+  }, [commit])
 
   // Absorb transformer scale into each widget's own size fields.
   const resize = useCallback((id: string, sx: number, sy: number, x: number, y: number) => {
@@ -65,35 +80,38 @@ export function useWidgetOps(args: WidgetOpsArgs) {
     // widgets spawning off-canvas at x=800 or x=510.
     const clamped = clampWidget(w, logicalW, logicalH)
     commit((l) => ({ ...l, widgets: [...l.widgets, clamped] }))
-    setSelectedId(clamped.id)
-  }, [commit, logicalW, logicalH, setSelectedId])
+    setSelectedIds([clamped.id])
+  }, [commit, logicalW, logicalH, setSelectedIds])
 
   const del = useCallback(() => {
-    const id = selectedIdRef.current
-    if (!id) return
-    commit((l) => ({ ...l, widgets: l.widgets.filter((w) => w.id !== id) }))
-    setSelectedId(null)
-  }, [commit, setSelectedId])
+    const ids = selectedIdsRef.current
+    if (!ids.length) return
+    commit((l) => ({ ...l, widgets: l.widgets.filter((w) => !ids.includes(w.id)) }))
+    setSelectedIds([])
+  }, [commit, setSelectedIds])
 
   const duplicate = useCallback(() => {
-    const id = selectedIdRef.current
-    if (!id) return
-    const src = layoutRef.current.widgets.find((w) => w.id === id)
-    if (!src) return
-    const copy = { ...src, id: newId(src.type), x: src.x + 24, y: src.y + 24 }
-    commit((l) => ({ ...l, widgets: [...l.widgets, copy] }))
-    setSelectedId(copy.id)
-  }, [commit, layoutRef, setSelectedId])
+    const ids = selectedIdsRef.current
+    if (!ids.length) return
+    const sources = layoutRef.current.widgets.filter((w) => ids.includes(w.id))
+    if (!sources.length) return
+    const copies = sources.map((src) => ({
+      ...src, id: newId(src.type), x: src.x + 24, y: src.y + 24,
+    }))
+    commit((l) => ({ ...l, widgets: [...l.widgets, ...copies] }))
+    setSelectedIds(copies.map((c) => c.id))
+  }, [commit, layoutRef, setSelectedIds])
 
-  // Render order = array order; front/back moves the widget to either end.
+  // Render order = array order; front/back moves the whole selection to either
+  // end, preserving its internal relative order.
   const reorder = useCallback((dir: 'front' | 'back') => {
-    const id = selectedIdRef.current
-    if (!id) return
+    const ids = selectedIdsRef.current
+    if (!ids.length) return
     commit((l) => {
-      const w = l.widgets.find((x) => x.id === id)
-      if (!w) return l
-      const rest = l.widgets.filter((x) => x.id !== id)
-      return { ...l, widgets: dir === 'front' ? [...rest, w] : [w, ...rest] }
+      const picked = l.widgets.filter((x) => ids.includes(x.id))
+      if (!picked.length) return l
+      const rest = l.widgets.filter((x) => !ids.includes(x.id))
+      return { ...l, widgets: dir === 'front' ? [...rest, ...picked] : [...picked, ...rest] }
     })
   }, [commit])
 
@@ -112,21 +130,36 @@ export function useWidgetOps(args: WidgetOpsArgs) {
     })
   }, [commit])
 
+  // Drop a widget at an absolute array index (LayerPanel drag & drop).
+  const reorderTo = useCallback((id: string, targetIdx: number) => {
+    commit((l) => {
+      const idx = l.widgets.findIndex((x) => x.id === id)
+      if (idx < 0) return l
+      const clampedTo = Math.max(0, Math.min(l.widgets.length - 1, targetIdx))
+      if (clampedTo === idx) return l
+      const arr = l.widgets.slice()
+      const [w] = arr.splice(idx, 1)
+      arr.splice(clampedTo, 0, w)
+      return { ...l, widgets: arr }
+    })
+  }, [commit])
+
   const deleteById = useCallback((id: string) => {
     commit((l) => ({ ...l, widgets: l.widgets.filter((w) => w.id !== id) }))
-    if (selectedIdRef.current === id) setSelectedId(null)
-  }, [commit, setSelectedId])
+    const ids = selectedIdsRef.current
+    if (ids.includes(id)) setSelectedIds(ids.filter((x) => x !== id))
+  }, [commit, setSelectedIds])
 
-  // Align the selected widget against the logical canvas edges/center.
+  // Align every selected widget against the logical canvas edges/center.
   // widgetBounds is an estimate for text-like widgets (same approximation
   // the clamp path already relies on), exact for box-sized widgets.
   const align = useCallback((mode: AlignMode) => {
-    const id = selectedIdRef.current
-    if (!id) return
+    const ids = selectedIdsRef.current
+    if (!ids.length) return
     commit((l) => ({
       ...l,
       widgets: l.widgets.map((w) => {
-        if (w.id !== id) return w
+        if (!ids.includes(w.id)) return w
         const b = widgetBounds(w)
         switch (mode) {
           case 'left': return { ...w, x: 0 }
@@ -141,16 +174,17 @@ export function useWidgetOps(args: WidgetOpsArgs) {
   }, [commit, logicalW, logicalH])
 
   const nudge = useCallback((dx: number, dy: number) => {
-    const id = selectedIdRef.current
-    if (!id) return
+    const ids = selectedIdsRef.current
+    if (!ids.length) return
     commit((l) => ({
       ...l,
-      widgets: l.widgets.map((w) => (w.id === id ? { ...w, x: w.x + dx, y: w.y + dy } : w)),
+      widgets: l.widgets.map((w) =>
+        ids.includes(w.id) ? { ...w, x: w.x + dx, y: w.y + dy } : w),
     }))
   }, [commit])
 
   return {
-    selectedIdRef, update, move, resize, addWidget, del, duplicate,
-    reorder, reorderOne, deleteById, align, nudge,
+    selectedIdsRef, update, move, moveMany, resize, addWidget, del, duplicate,
+    reorder, reorderOne, reorderTo, deleteById, align, nudge,
   }
 }

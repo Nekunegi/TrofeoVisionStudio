@@ -331,12 +331,21 @@ interface Props {
   // Loopback audio spectrum (SPECTRUM_BANDS values, 0..1) for visualizer widgets.
   spectrum?: number[] | null
   editable?: boolean
-  selectedId?: string | null
-  onSelect?: (id: string | null) => void
+  selectedIds?: string[]
+  // additive = Shift/Ctrl held: toggles the id in/out of the selection.
+  onSelect?: (id: string | null, additive?: boolean) => void
+  // Rubber-band result. additive keeps the existing selection.
+  onSelectMany?: (ids: string[], additive?: boolean) => void
   onMove?: (id: string, x: number, y: number) => void
+  // Group-drag drop: every selected widget's final position in one batch
+  // (one undo step).
+  onMoveMany?: (moves: { id: string; x: number; y: number }[]) => void
   // Fired when the user resizes via the transformer handles: scale factors the
   // widget should absorb into its own size fields, plus the (possibly moved) origin.
   onResize?: (id: string, sx: number, sy: number, x: number, y: number) => void
+  // Right-click on a widget (after it joins the selection): screen coords for
+  // the caller's context menu.
+  onWidgetMenu?: (clientX: number, clientY: number) => void
   // Logical panel dims — default landscape (1920x480) but the caller can pass
   // portrait (480x1920) when the physical panel is mounted rotated 90/270°.
   logicalW?: number
@@ -357,14 +366,35 @@ const SNAP_PX = 8
 
 const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
   { layout, sensors, now, history, toasts = [], bgEl, media = null, spectrum = null,
-    editable = false, selectedId, onSelect, onMove, onResize,
-    logicalW = PANEL_W, logicalH = PANEL_H }, ref,
+    editable = false, selectedIds = [], onSelect, onSelectMany, onMove, onMoveMany,
+    onResize, onWidgetMenu, logicalW = PANEL_W, logicalH = PANEL_H }, ref,
 ) {
   const trRef = useRef<Konva.Transformer>(null)
   const groupRefs = useRef(new Map<string, Konva.Group>())
+  // The transformer (resize handles) only serves single selection; a multi
+  // selection gets per-widget dashed outlines instead.
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selected = layout.widgets.find((w) => w.id === selectedId)
   // Guide lines shown while a drag is snapped (editor chrome layer only).
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
+  // Rubber-band selection rect (stage coords) while dragging on empty canvas.
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean } | null>(null)
+  // Rect mirrored in a ref — mouseup can fire before React commits the last
+  // mousemove's setState, and a fast drag must not read a stale null.
+  const marqueeRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
+  // Dashed outlines around every widget of a multi selection.
+  const [outlines, setOutlines] = useState<{ x: number; y: number; width: number; height: number }[]>([])
+  // Group drag state: start positions of the co-selected widgets so they
+  // follow the dragged one 1:1 (snapping applies to the dragged node only).
+  const groupDragRef = useRef<{
+    anchorId: string
+    from: { x: number; y: number }
+    others: Map<string, { x: number; y: number }>
+  } | null>(null)
+  // Konva suppresses click after an actual drag, but guard explicitly so a
+  // group drag can never collapse the selection on drop.
+  const draggedRef = useRef(false)
   // Offscreen bg canvas: the bg Shape below draws the transformed background
   // into this alongside the main stage, so GlassPanel can sample it 1:1
   // and its blur matches the visible bg exactly. Sized to logicalW/H so a
@@ -391,8 +421,13 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
     const r = node.getClientRect(skip)
     const vTargets = [0, logicalW / 2, logicalW]
     const hTargets = [0, logicalH / 2, logicalH]
+    // Co-selected widgets move with the drag — they are not stationary
+    // snap targets.
+    const moving = groupDragRef.current
+      ? new Set([id, ...groupDragRef.current.others.keys()])
+      : new Set([id])
     for (const other of layout.widgets) {
-      if (other.id === id) continue
+      if (moving.has(other.id)) continue
       const g = groupRefs.current.get(other.id)
       if (!g) continue
       const o = g.getClientRect(skip)
@@ -433,19 +468,80 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
     tr.getLayer()?.batchDraw()
   }, [selectedId, selected, layout])
 
+  // Multi-selection outlines (chrome layer): client rects of every selected
+  // widget, recomputed after each layout/selection change.
+  useEffect(() => {
+    if (!editable || selectedIds.length <= 1) {
+      setOutlines((o) => (o.length ? [] : o))
+      return
+    }
+    const skip = { skipShadow: true, skipStroke: true }
+    setOutlines(selectedIds
+      .map((id) => groupRefs.current.get(id)?.getClientRect(skip))
+      .filter((r): r is NonNullable<typeof r> => !!r))
+  }, [editable, selectedIds, layout])
+
+  // Finish (or abandon) a rubber-band drag: select every widget whose client
+  // rect intersects the marquee; a sub-3px drag counts as a plain click.
+  const endMarquee = () => {
+    const start = marqueeRef.current
+    marqueeRef.current = null
+    if (!start) return
+    const m = marqueeRectRef.current
+    marqueeRectRef.current = null
+    setMarquee(null)
+    if (!m || (m.w < 3 && m.h < 3)) {
+      if (!start.additive) onSelect?.(null)
+      return
+    }
+    const skip = { skipShadow: true, skipStroke: true }
+    const hits: string[] = []
+    for (const w of layout.widgets) {
+      if (w.hidden || w.locked) continue
+      const g = groupRefs.current.get(w.id)
+      if (!g) continue
+      const r = g.getClientRect(skip)
+      if (r.x < m.x + m.w && r.x + r.width > m.x &&
+          r.y < m.y + m.h && r.y + r.height > m.y) hits.push(w.id)
+    }
+    onSelectMany?.(hits, start.additive)
+  }
+
   return (
     <Stage
       ref={ref}
       width={logicalW}
       height={logicalH}
       onMouseDown={(e) => {
-        if (editable && e.target === e.target.getStage()) onSelect?.(null)
+        if (!editable || e.target !== e.target.getStage()) return
+        if (e.evt.button !== 0) return
+        const pos = e.target.getStage()!.getPointerPosition()
+        if (!pos) return
+        marqueeRef.current = {
+          x0: pos.x, y0: pos.y,
+          additive: e.evt.shiftKey || e.evt.ctrlKey,
+        }
       }}
+      onMouseMove={(e) => {
+        const start = marqueeRef.current
+        if (!start) return
+        const pos = e.target.getStage()?.getPointerPosition()
+        if (!pos) return
+        const rect = {
+          x: Math.min(start.x0, pos.x), y: Math.min(start.y0, pos.y),
+          w: Math.abs(pos.x - start.x0), h: Math.abs(pos.y - start.y0),
+        }
+        marqueeRectRef.current = rect
+        setMarquee(rect)
+      }}
+      onMouseUp={endMarquee}
+      onMouseLeave={endMarquee}
+      onContextMenu={(e) => { if (editable) e.evt.preventDefault() }}
     >
       <Layer>
-        <Rect width={logicalW} height={logicalH} fill={layout.bgColor} />
+        <Rect width={logicalW} height={logicalH} fill={layout.bgColor} listening={false} />
         {bgEl && (
-          <Shape sceneFunc={(ctx) => {
+          <Shape listening={false} sceneFunc={(ctx) => {
             const blur = layout.bgBlur ?? 0
             const scale = layout.bgScale ?? 1
             const rotDeg = layout.bgRotate ?? 0
@@ -514,7 +610,7 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
           }} />
         )}
         {bgEl && (layout.bgDim ?? 0) > 0 && (
-          <Rect width={logicalW} height={logicalH} fill="#000"
+          <Rect width={logicalW} height={logicalH} fill="#000" listening={false}
             opacity={Math.min(0.9, layout.bgDim ?? 0)} />
         )}
         {layout.widgets.map((w) => {
@@ -531,11 +627,71 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
               y={w.y}
               opacity={w.opacity ?? 1}
               draggable={interactive}
-              onMouseDown={() => interactive && onSelect?.(w.id)}
-              onDragMove={(e) => interactive && snapDragMove(w.id, e)}
+              onMouseDown={(e) => {
+                if (!interactive) return
+                const additive = e.evt.shiftKey || e.evt.ctrlKey
+                if (additive) onSelect?.(w.id, true)
+                // A member of a multi selection keeps the group on mousedown
+                // so it can be group-dragged; a plain click (no drag) narrows
+                // to it in onClick below.
+                else if (!selectedIds.includes(w.id)) onSelect?.(w.id)
+              }}
+              onClick={(e) => {
+                if (!interactive || draggedRef.current) return
+                if (!e.evt.shiftKey && !e.evt.ctrlKey &&
+                    selectedIds.length > 1 && selectedIds.includes(w.id)) {
+                  onSelect?.(w.id)
+                }
+              }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault()
+                if (!interactive) return
+                if (!selectedIds.includes(w.id)) onSelect?.(w.id)
+                onWidgetMenu?.(e.evt.clientX, e.evt.clientY)
+              }}
+              onDragStart={() => {
+                draggedRef.current = true
+                if (selectedIds.length > 1 && selectedIds.includes(w.id)) {
+                  const others = new Map<string, { x: number; y: number }>()
+                  for (const id of selectedIds) {
+                    if (id === w.id) continue
+                    const g = groupRefs.current.get(id)
+                    if (g) others.set(id, { x: g.x(), y: g.y() })
+                  }
+                  groupDragRef.current = { anchorId: w.id, from: { x: w.x, y: w.y }, others }
+                } else {
+                  groupDragRef.current = null
+                }
+              }}
+              onDragMove={(e) => {
+                if (!interactive) return
+                snapDragMove(w.id, e)
+                const gd = groupDragRef.current
+                if (gd && gd.anchorId === w.id) {
+                  const dx = e.target.x() - gd.from.x
+                  const dy = e.target.y() - gd.from.y
+                  for (const [id, p] of gd.others) {
+                    groupRefs.current.get(id)?.position({ x: p.x + dx, y: p.y + dy })
+                  }
+                }
+              }}
               onDragEnd={(e) => {
                 setGuides({ v: [], h: [] })
-                onMove?.(w.id, Math.round(e.target.x()), Math.round(e.target.y()))
+                setTimeout(() => { draggedRef.current = false })
+                const gd = groupDragRef.current
+                groupDragRef.current = null
+                if (gd && gd.anchorId === w.id && onMoveMany) {
+                  const dx = e.target.x() - gd.from.x
+                  const dy = e.target.y() - gd.from.y
+                  onMoveMany([
+                    { id: w.id, x: Math.round(e.target.x()), y: Math.round(e.target.y()) },
+                    ...[...gd.others].map(([id, p]) => ({
+                      id, x: Math.round(p.x + dx), y: Math.round(p.y + dy),
+                    })),
+                  ])
+                } else {
+                  onMove?.(w.id, Math.round(e.target.x()), Math.round(e.target.y()))
+                }
               }}
               onTransformEnd={(e) => {
                 const node = e.target
@@ -560,6 +716,15 @@ const DashboardStage = forwardRef<Konva.Stage, Props>(function DashboardStage(
             <Line key={`h${y}`} points={[0, y, logicalW, y]}
               stroke="#ff4dd2" strokeWidth={1.5} dash={[6, 6]} listening={false} />
           ))}
+          {outlines.map((r, i) => (
+            <Rect key={`sel${i}`} x={r.x} y={r.y} width={r.width} height={r.height}
+              stroke="#4de1ff" strokeWidth={1.5} dash={[7, 5]} listening={false} />
+          ))}
+          {marquee && (marquee.w > 2 || marquee.h > 2) && (
+            <Rect x={marquee.x} y={marquee.y} width={marquee.w} height={marquee.h}
+              stroke="#4de1ff" strokeWidth={1.5} dash={[5, 4]}
+              fill="rgba(77,225,255,0.08)" listening={false} />
+          )}
           <Transformer
             ref={trRef}
             rotateEnabled={false}

@@ -21,6 +21,7 @@ export interface PresetEntry {
   layout: Layout
   media: string | null // background data URL captured at save time (image path)
   videoMedia?: Blob | null // background video Blob captured at save time
+  thumb?: string | null // small JPEG snapshot of the canvas at save time
 }
 
 // Read the current video blob back out for preset embedding.
@@ -117,6 +118,25 @@ export async function listPresets(): Promise<string[]> {
       .filter((k): k is string => typeof k === 'string' && k.startsWith(PRESET_PREFIX))
       .map((k) => k.slice(PRESET_PREFIX.length))
       .sort()
+  } catch {
+    return []
+  }
+}
+
+/** Names + thumbnails for the preset list. getAll/getAllKeys return entries
+ * in the same (key-sorted) order, so pairing by index is safe. Heavy fields
+ * (media/videoMedia) are dropped immediately. */
+export async function listPresetThumbs(): Promise<{ name: string; thumb: string | null }[]> {
+  try {
+    const keys = await withStore<IDBValidKey[]>('readonly', (s) => s.getAllKeys())
+    const vals = await withStore<unknown[]>('readonly', (s) => s.getAll())
+    const out: { name: string; thumb: string | null }[] = []
+    keys.forEach((k, i) => {
+      if (typeof k !== 'string' || !k.startsWith(PRESET_PREFIX)) return
+      const v = vals[i] as Partial<PresetEntry> | undefined
+      out.push({ name: k.slice(PRESET_PREFIX.length), thumb: v?.thumb ?? null })
+    })
+    return out.sort((a, b) => a.name.localeCompare(b.name))
   } catch {
     return []
   }

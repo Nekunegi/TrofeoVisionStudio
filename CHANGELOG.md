@@ -6,6 +6,36 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.14.0] — 2026-07-07
+
+### Added
+- **Multi-select.** Shift/Ctrl+click widgets (canvas or Layers rows) or drag a
+  rubber-band box on empty canvas. Selected widgets move together when any of
+  them is dragged (one undo step), and Delete / Duplicate / Align / Front /
+  Back / arrow-key nudge apply to the whole selection.
+- **Right-click context menu** on canvas widgets: Duplicate / Bring to front /
+  Send to back / Delete.
+- **Preset thumbnails.** Saving a preset captures a small snapshot of the
+  canvas; the preset list shows it so layouts are recognizable at a glance.
+- **Layers drag & drop** — reorder rows by dragging (the arrows remain).
+- When a selected sensor widget's value is unavailable, the Selection panel
+  now says so (with the admin + PawnIO hint for CPU temperature).
+
+### Changed
+- **"Reset layout" and preset overwrite are now two-step**: the first click
+  arms the button for 3 s, the second executes; a reset also shows an undo
+  hint. The native `confirm()` dialog is gone.
+- Layers rows show their delete icon on hover only (less visual noise).
+- The header no longer shows a misleading "target 1 fps" for static
+  backgrounds — it now reads "sends on redraw (static bg)".
+- The layout-save-failure toast is localized (was Japanese-only).
+
+### Fixed
+- **Widgets can no longer get stranded outside the canvas** when the logical
+  canvas shrinks under an existing layout — panel auto-detection reporting a
+  narrower panel (6.86" / 1280 px), or loading/importing a preset made on
+  another orientation. Out-of-bounds widgets are pulled back in reach.
+
 ## [1.13.0] — 2026-07-07
 
 ### Added

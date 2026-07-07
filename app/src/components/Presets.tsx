@@ -3,19 +3,29 @@ import { Save, Download, Upload, Trash2 } from 'lucide-react'
 import {
   IDB_BG, IDB_BG_VIDEO,
   saveBgMedia, saveBgVideo, loadBgMedia, loadBgVideoBlob,
-  savePreset, loadPreset, deletePreset, listPresets,
+  savePreset, loadPreset, deletePreset, listPresetThumbs,
 } from '../bgStore'
 import { type Layout } from '../types'
 import { useT } from '../i18n'
 
+interface PresetsProps {
+  layout: Layout
+  onLoad: (l: Layout) => void
+  // Small canvas snapshot stored with the preset for the list thumbnail.
+  capture?: () => string | null
+}
+
 // Presets live in IndexedDB and embed a copy of the background media, so
 // loading a preset (or importing an exported JSON) restores the full look.
-export function Presets({ layout, onLoad }: { layout: Layout; onLoad: (l: Layout) => void }) {
+export function Presets({ layout, onLoad, capture }: PresetsProps) {
   const t = useT()
-  const [names, setNames] = useState<string[]>([])
+  const [entries, setEntries] = useState<{ name: string; thumb: string | null }[]>([])
   const [name, setName] = useState('')
+  // Two-step overwrite guard (in-app, not a native confirm dialog).
+  const [confirmKey, setConfirmKey] = useState<string | null>(null)
+  const names = entries.map((e) => e.name)
 
-  useEffect(() => { listPresets().then(setNames) }, [])
+  useEffect(() => { listPresetThumbs().then(setEntries) }, [])
 
   // Match plain IDB_BG or IDB_BG#<epoch>. Video sentinel is a distinct prefix.
   const isImageBg = (s: string | null | undefined) =>
@@ -31,10 +41,16 @@ export function Presets({ layout, onLoad }: { layout: Layout; onLoad: (l: Layout
   const save = async () => {
     const key = name.trim()
     if (!key) return
+    if (names.includes(key) && confirmKey !== key) {
+      // Arm the overwrite for 3s — the button relabels to make it explicit.
+      setConfirmKey(key)
+      setTimeout(() => setConfirmKey((c) => (c === key ? null : c)), 3000)
+      return
+    }
+    setConfirmKey(null)
     const [media, videoMedia] = await Promise.all([currentImageMedia(), currentVideoMedia()])
-    if (names.includes(key) && !confirm(`Overwrite preset "${key}"?`)) return
-    await savePreset(key, { layout, media, videoMedia })
-    setNames(await listPresets())
+    await savePreset(key, { layout, media, videoMedia, thumb: capture?.() ?? null })
+    setEntries(await listPresetThumbs())
     setName('')
   }
 
@@ -55,7 +71,7 @@ export function Presets({ layout, onLoad }: { layout: Layout; onLoad: (l: Layout
 
   const remove = async (key: string) => {
     await deletePreset(key)
-    setNames(await listPresets())
+    setEntries(await listPresetThumbs())
   }
 
   // Only images survive JSON export cleanly (data URL). Video is a Blob and
@@ -141,12 +157,18 @@ export function Presets({ layout, onLoad }: { layout: Layout; onLoad: (l: Layout
     <div>
       <div className="row">
         <input placeholder={t('presets.namePlaceholder')} value={name}
-          onChange={(e) => setName(e.target.value)} />
-        <button onClick={save}><Save size={13} />{t('presets.save')}</button>
+          onChange={(e) => { setName(e.target.value); setConfirmKey(null) }} />
+        <button className={confirmKey ? 'danger' : ''} onClick={save}>
+          <Save size={13} />
+          {confirmKey ? t('presets.overwrite') : t('presets.save')}
+        </button>
       </div>
-      {names.map((k) => (
+      {entries.map(({ name: k, thumb }) => (
         <div className="preset-item" key={k}>
-          <button className="name" onClick={() => load(k)}>{k}</button>
+          <button className="name" onClick={() => load(k)}>
+            {thumb && <img className="preset-thumb" src={thumb} alt="" />}
+            <span>{k}</span>
+          </button>
           <button className="danger x" onClick={() => remove(k)}><Trash2 size={12} /></button>
         </div>
       ))}

@@ -16,8 +16,9 @@ const noop = () => {}
 describe('LayerPanel', () => {
   it('lists widgets top-of-stack first (reverse of array order)', () => {
     render(
-      <LayerPanel widgets={widgets} selectedId={null}
-        onSelect={noop} onUpdate={noop} onDelete={noop} onReorder={noop} />,
+      <LayerPanel widgets={widgets} selectedIds={[]}
+        onSelect={noop} onUpdate={noop} onDelete={noop} onReorder={noop}
+        onReorderTo={noop} />,
     )
     const names = screen.getAllByRole('listitem').map((li) => li.textContent)
     // clock (array end = front) should be the first row
@@ -30,11 +31,12 @@ describe('LayerPanel', () => {
     const onUpdate = vi.fn()
     const onDelete = vi.fn()
     render(
-      <LayerPanel widgets={widgets} selectedId={null}
-        onSelect={onSelect} onUpdate={onUpdate} onDelete={onDelete} onReorder={noop} />,
+      <LayerPanel widgets={widgets} selectedIds={[]}
+        onSelect={onSelect} onUpdate={onUpdate} onDelete={onDelete} onReorder={noop}
+        onReorderTo={noop} />,
     )
     fireEvent.click(screen.getByText('CPU BAR'))
-    expect(onSelect).toHaveBeenCalledWith('bar-1')
+    expect(onSelect).toHaveBeenCalledWith('bar-1', false)
 
     const rows = screen.getAllByRole('listitem')
     // Row buttons: [main, up, down, eye, lock, delete]
@@ -45,11 +47,39 @@ describe('LayerPanel', () => {
     expect(onDelete).toHaveBeenCalledWith('bar-1')
   })
 
+  it('Ctrl+click selects additively', () => {
+    const onSelect = vi.fn()
+    render(
+      <LayerPanel widgets={widgets} selectedIds={['clock-1']}
+        onSelect={onSelect} onUpdate={noop} onDelete={noop} onReorder={noop}
+        onReorderTo={noop} />,
+    )
+    fireEvent.click(screen.getByText('CPU BAR'), { ctrlKey: true })
+    expect(onSelect).toHaveBeenCalledWith('bar-1', true)
+  })
+
+  it('drag & drop maps display rows to array indices (rows are reversed)', () => {
+    const onReorderTo = vi.fn()
+    render(
+      <LayerPanel widgets={widgets} selectedIds={[]}
+        onSelect={noop} onUpdate={noop} onDelete={noop} onReorder={noop}
+        onReorderTo={onReorderTo} />,
+    )
+    const rows = screen.getAllByRole('listitem')
+    // Drag the clock row (display 0 = array idx 1) onto the bar row
+    // (display 1 = array idx 0).
+    fireEvent.dragStart(rows[0])
+    fireEvent.dragOver(rows[1])
+    fireEvent.drop(rows[1])
+    expect(onReorderTo).toHaveBeenCalledWith('clock-1', 0)
+  })
+
   it('reorder arrows report the correct direction', () => {
     const onReorder = vi.fn()
     render(
-      <LayerPanel widgets={widgets} selectedId={null}
-        onSelect={noop} onUpdate={noop} onDelete={noop} onReorder={onReorder} />,
+      <LayerPanel widgets={widgets} selectedIds={[]}
+        onSelect={noop} onUpdate={noop} onDelete={noop} onReorder={onReorder}
+        onReorderTo={noop} />,
     )
     const rows = screen.getAllByRole('listitem')
     const clockButtons = rows[0].querySelectorAll('button')
