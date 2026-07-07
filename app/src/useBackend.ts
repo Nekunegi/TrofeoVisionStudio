@@ -26,6 +26,9 @@ export interface Backend {
   link: LinkState
   device: string // 'connected' | 'disconnected' | 'unknown'
   deviceDetail: string
+  // Physical panel size self-reported by the device handshake (null until the
+  // first "connected" status). 1920x480 on the 9.16", 1280x480 on the 6.86".
+  panel: { w: number; h: number } | null
   sensors: Sensors
   // Latest Windows toast (new object per arrival) + listener permission state.
   notification: ToastData | null
@@ -49,6 +52,7 @@ export function useBackend(): Backend {
   const [link, setLink] = useState<LinkState>('connecting')
   const [device, setDevice] = useState('unknown')
   const [deviceDetail, setDeviceDetail] = useState('')
+  const [panel, setPanel] = useState<{ w: number; h: number } | null>(null)
   const [sensors, setSensors] = useState<Sensors>(EMPTY_SENSORS)
   const [notification, setNotification] = useState<ToastData | null>(null)
   const [notifyStatus, setNotifyStatus] = useState('unknown')
@@ -85,6 +89,13 @@ export function useBackend(): Backend {
         else if (msg.type === 'status') {
           setDevice(msg.device)
           setDeviceDetail(msg.detail ?? '')
+          // Panel size rides the "connected" status. Kept across disconnects —
+          // the physical panel doesn't change, and dropping it would bounce
+          // the editor canvas on every backend restart.
+          const w = +msg.width, h = +msg.height
+          if (w >= 240 && w <= 4096 && h >= 240 && h <= 4096) {
+            setPanel((prev) => (prev?.w === w && prev?.h === h ? prev : { w, h }))
+          }
         } else if (msg.type === 'notification') {
           setNotification({ ...(msg.data as ToastData) })
         } else if (msg.type === 'notifyStatus') {
@@ -199,7 +210,7 @@ export function useBackend(): Backend {
   }, [])
 
   return {
-    link, device, deviceDetail, sensors, notification, notifyStatus, media,
+    link, device, deviceDetail, panel, sensors, notification, notifyStatus, media,
     spectrumFrame, spectrumStatus, lcdStats, sendFrame, sendCmd,
   }
 }

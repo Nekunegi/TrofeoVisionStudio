@@ -201,10 +201,27 @@ Standalone scripts for first-time setup and protocol validation:
 | Chunk | 512B (16B header + 496B payload) |
 | Burst | 4096B (8 chunks); tail 2048B |
 | Image | **JPEG** encoded (LY family requirement) |
-| Resolution | **1920 x 480** |
+| Resolution | **1920 x 480** (9.16"). Auto-detected from the handshake self-report — the 6.86" model (1280 x 480 / PID `0x5302`) has experimental support |
 
 See **[docs/PROTOCOL.md](docs/PROTOCOL.md)** for the full byte-level layout,
 burst structure, and error recovery notes.
+
+---
+
+## Environment variables
+
+Override backend (`server.py` / `server.exe`) and Electron shell behavior.
+None of these are needed for normal use.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TROFEO_HOST` | `127.0.0.1` | WebSocket bind address. `0.0.0.0` exposes it to the LAN (at your own risk) |
+| `TROFEO_PORT` | `8787` | WebSocket port; change to run a dev backend beside the resident one |
+| `TROFEO_WIDTH` / `TROFEO_HEIGHT` | auto-detected | Force the panel resolution (for units with a broken self-report) |
+| `TROFEO_VID` / `TROFEO_PID` | `0x0416` / `0x5408,0x5302` | Override the USB ids (for trying unknown LY panels) |
+| `TROFEO_LOGLEVEL` | `info` | `debug` writes per-poll diagnostics to `backend.log` |
+| `TROFEO_BACKEND_URL` | `ws://localhost:8787` | (Electron) backend URL the renderer connects to |
+| `TROFEO_DEV` | unset | `1` enables the `DEBUG_*` hooks in packaged builds |
 
 ---
 

@@ -41,8 +41,8 @@ def _fmt(v, suffix="", nd=0):
 
 
 def _centered(d: ImageDraw.ImageDraw, cx, y, text, font, fill):
-    l, t, r, b = d.textbbox((0, 0), text, font=font)
-    d.text((cx - (r - l) / 2, y), text, font=font, fill=fill)
+    left, _t, right, _b = d.textbbox((0, 0), text, font=font)
+    d.text((cx - (right - left) / 2, y), text, font=font, fill=fill)
 
 
 def _column(d: ImageDraw.ImageDraw, x0, width, title, temp, load, sub):

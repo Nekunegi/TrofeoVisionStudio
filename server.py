@@ -2,7 +2,9 @@
 
 Protocol (ws://localhost:8787):
   server -> client (text/JSON):
-    {"type":"status",         "device":"connected"|"disconnected", "detail":"..."}
+    {"type":"status",         "device":"connected"|"disconnected", "detail":"...",
+                              "width":1920, "height":480}  # panel size present
+                              # when connected (self-reported by the handshake)
     {"type":"sensors",        "data":{cpuTemp,cpuLoad,cpuPower,cpuClock,
                                       gpuTemp,gpuLoad,gpuPower,ramLoad,
                                       netUp,netDown,diskLoad}}
@@ -28,20 +30,19 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import logging
 import math
 import os
 import re
-import sys
 import threading
 import time
 
-# The console may be cp932 (Japanese Windows); never let logging crash on
-# non-ASCII characters in exception messages.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(errors="replace")
-    except Exception:
-        pass
+from trofeo.log import get_logger
+
+log = get_logger("server")
+# The websockets library logs its own "server listening" / "connection open"
+# lines at INFO — redundant next to ours; keep backend.log signal-dense.
+logging.getLogger("websockets").setLevel(logging.WARNING)
 
 
 def _finite(v):
@@ -70,6 +71,11 @@ from trofeo.sensors import Sensors
 # LAN exposure (companion apps, remote layout tweaks); default is safe.
 HOST = os.environ.get("TROFEO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("TROFEO_PORT", "8787"))  # override for side-by-side testing
+# Panel size overrides for units whose handshake self-report is missing/wrong.
+# Normally auto-detected: width from the handshake reply, height fixed at 480
+# (every known LY panel).
+FORCE_W = int(os.environ.get("TROFEO_WIDTH", "0")) or None
+FORCE_H = int(os.environ.get("TROFEO_HEIGHT", "0")) or None
 MAX_TEXT_MSG = 4096  # our JSON commands are tiny; reject anything larger
 
 # Origin allowlist for browser-initiated WebSocket connections:
@@ -93,6 +99,8 @@ class DeviceManager:
         self._dev: TrofeoDevice | None = None
         self._proto: LyProtocol | None = None
         self._lock = threading.Lock()
+        self.panel_width: int | None = None
+        self.panel_height: int | None = None
 
     @property
     def connected(self) -> bool:
@@ -102,9 +110,15 @@ class DeviceManager:
         self._dev = TrofeoDevice.open()
         stale = self._dev.drain_in()  # discard e.g. an unread ACK from a dead sender
         if stale:
-            print(f"[device] drained {stale} stale bytes before handshake", flush=True)
+            log.info(f"[device] drained {stale} stale bytes before handshake")
         self._proto = LyProtocol(self._dev)
         self._proto.handshake()
+        detected = self._proto.panel_width
+        self.panel_width = FORCE_W or detected or 1920
+        self.panel_height = FORCE_H or 480
+        log.info(f"[device] panel {self.panel_width}x{self.panel_height} "
+                 f"({'self-reported' if detected else 'default'}"
+                 f"{', env override' if FORCE_W or FORCE_H else ''})")
 
     def ensure(self) -> None:
         with self._lock:
@@ -122,14 +136,14 @@ class DeviceManager:
                 # panel stuck mid-transfer from a previous crashed sender (see
                 # TrofeoDevice.reset()) — a plain close+reopen leaves the device
                 # in the same wedged state.
-                print(f"[device] send failed ({e}); attempting reset+reopen", flush=True)
+                log.warning(f"[device] send failed ({e}); attempting reset+reopen")
                 old = self._dev
                 self._dev = self._proto = None
                 if old is not None:
                     try:
                         old.reset()
                     except Exception as reset_err:
-                        print(f"[device] reset failed: {reset_err}", flush=True)
+                        log.warning(f"[device] reset failed: {reset_err}")
                 self._connect()
                 self._proto.send_frame(jpeg)
 
@@ -197,7 +211,7 @@ async def spectrum_loop():
 async def media_loop():
     """Poll the system media session and broadcast now-playing changes."""
     status = await media.start()
-    print(f"[media] watcher status: {status}", flush=True)
+    log.info(f"[media] watcher status: {status}")
     if status != "ok":
         return
     while True:
@@ -212,14 +226,14 @@ async def media_loop():
                     except Exception:
                         pass
         except Exception as e:
-            print(f"[media] poll failed: {e}", flush=True)
+            log.warning(f"[media] poll failed: {e}")
             await asyncio.sleep(30)
 
 
 async def notification_loop():
     """Poll Windows toasts and broadcast new ones to every connected client."""
     status = await notifier.start()
-    print(f"[notify] listener status: {status}", flush=True)
+    log.info(f"[notify] listener status: {status}")
     if status != "allowed":
         return
     while True:
@@ -233,7 +247,7 @@ async def notification_loop():
                     except Exception:
                         pass
         except Exception as e:
-            print(f"[notify] poll failed: {e}", flush=True)
+            log.warning(f"[notify] poll failed: {e}")
             await asyncio.sleep(30)
 
 
@@ -264,7 +278,7 @@ async def sensor_loop(ws):
             err_streak += 1
             # log the first few and then only every 30s to avoid spam on a stuck sensor
             if err_streak <= 3 or err_streak % int(30 * SENSOR_HZ) == 0:
-                print(f"[sensors] read/send failed (streak {err_streak}): {e}", flush=True)
+                log.warning(f"[sensors] read/send failed (streak {err_streak}): {e}")
         await asyncio.sleep(1.0 / SENSOR_HZ)
 
 
@@ -291,14 +305,18 @@ def _get_origin(ws) -> str | None:
 async def handler(ws):
     origin = _get_origin(ws)
     if origin is not None and not LEGIT_ORIGIN.match(origin):
-        print(f"[ws] rejecting cross-origin connect: {origin}", flush=True)
+        log.warning(f"[ws] rejecting cross-origin connect: {origin}")
         await ws.close(code=1008, reason="forbidden origin")
         return
-    print("client connected", flush=True)
+    log.info("client connected")
     loop = asyncio.get_running_loop()
 
     async def report(status, detail=""):
-        await ws.send(json.dumps({"type": "status", "device": status, "detail": detail}))
+        msg = {"type": "status", "device": status, "detail": detail}
+        if status == "connected" and device.panel_width:
+            msg["width"] = device.panel_width
+            msg["height"] = device.panel_height
+        await ws.send(json.dumps(msg))
 
     # Register the client BEFORE any potentially-throwing send so the
     # finally block below always runs — otherwise a pre-loop send failure
@@ -337,7 +355,7 @@ async def handler(ws):
             try:
                 await loop.run_in_executor(None, device.send_frame, frame)
             except Exception as e:
-                print(f"[device] frame send failed: {e}", flush=True)
+                log.warning(f"[device] frame send failed: {e}")
                 await report("disconnected", str(e))
                 continue
             dt = (time.perf_counter() - t0) * 1000.0
@@ -353,9 +371,9 @@ async def handler(ws):
                 with open(dump_path, "wb") as f:
                     f.write(frame)
             if _frame_count % 100 == 0 and log_sent:
-                print(f"frames delivered to LCD: {_frame_count} "
-                      f"(last {len(frame)} B, usb avg {log_busy_ms / log_sent:.1f} ms "
-                      f"max {log_max_ms:.1f} ms, {skipped[0]} stale skipped)", flush=True)
+                log.info(f"frames delivered to LCD: {_frame_count} "
+                         f"(last {len(frame)} B, usb avg {log_busy_ms / log_sent:.1f} ms "
+                         f"max {log_max_ms:.1f} ms, {skipped[0]} stale skipped)")
                 log_sent = 0
                 log_busy_ms = 0.0
                 log_max_ms = 0.0
@@ -388,7 +406,7 @@ async def handler(ws):
             await loop.run_in_executor(None, device.ensure)
             await report("connected")
         except Exception as e:
-            print(f"[device] connect failed: {e}", flush=True)
+            log.warning(f"[device] connect failed: {e}")
             await report("disconnected", str(e))
 
         sensor_task = asyncio.create_task(sensor_loop(ws))
@@ -439,13 +457,13 @@ async def handler(ws):
                 await asyncio.wait_for(sensor_task, timeout=2.0)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
-        print("client disconnected")
+        log.info("client disconnected")
 
 
 async def main():
-    print(f"backend listening on ws://{HOST}:{PORT}")
+    log.info(f"backend listening on ws://{HOST}:{PORT}")
     if sensors.lhm_error:
-        print(f"[warn] LHM unavailable: {sensors.lhm_error} (loads/RAM only)")
+        log.warning(f"[warn] LHM unavailable: {sensors.lhm_error} (loads/RAM only)")
     notify_task = asyncio.create_task(notification_loop())
     media_task = asyncio.create_task(media_loop())
     spectrum_task = asyncio.create_task(spectrum_loop())

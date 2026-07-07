@@ -17,6 +17,10 @@ from typing import Optional
 
 import psutil
 
+from .log import get_logger
+
+log = get_logger("trofeo.sensors")
+
 # LHM DLLs live in ./libs next to the repo root in dev, and next to server.exe
 # when frozen by PyInstaller (bundled as extraResources/backend/libs).
 if getattr(sys, "frozen", False):
@@ -153,8 +157,8 @@ class Sensors:
         m.net_up, m.net_down = self._net_rates()
         try:
             m.disk_load = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\").percent
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("[sensors] disk_usage failed: %s", e)
         return m
 
     def close(self):

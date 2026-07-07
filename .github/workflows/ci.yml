@@ -38,10 +38,13 @@ jobs:
         # the repo root the same way a user would.
         run: |
           python -m py_compile server.py
-          python -m py_compile trofeo\__init__.py trofeo\audio.py trofeo\dashboard.py trofeo\device.py trofeo\media.py trofeo\notifications.py trofeo\protocol.py trofeo\render.py trofeo\sensors.py
+          python -m py_compile trofeo\__init__.py trofeo\audio.py trofeo\dashboard.py trofeo\device.py trofeo\log.py trofeo\media.py trofeo\notifications.py trofeo\protocol.py trofeo\render.py trofeo\sensors.py
           python -m py_compile tools\demo.py tools\diag.py tools\hs_test.py tools\monitor.py tools\probe.py
 
-      - name: Protocol tests
+      - name: Ruff lint
+        run: python -m ruff check .
+
+      - name: Backend tests
         run: python -m pytest
 
   # Frontend: lint, typecheck, build, and vitest.

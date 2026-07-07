@@ -39,6 +39,9 @@ BURST_SIZE = BURST_CHUNKS * CHUNK_SIZE  # 4096
 class LyProtocol:
     def __init__(self, dev: TrofeoDevice):
         self.dev = dev
+        # filled in by handshake() from the device's self-report
+        self.device_id: int | None = None
+        self.panel_width: int | None = None
 
     # -- handshake ---------------------------------------------------------
     def handshake(self) -> None:
@@ -54,6 +57,16 @@ class LyProtocol:
             raise RuntimeError(
                 f"Unexpected handshake reply: {resp[:16].hex(' ') if resp else '<empty>'}"
             )
+        # The reply self-reports the unit: device id (u32 LE at offset 16,
+        # matches the USB serial) and panel width in pixels (u16 LE at offset
+        # 24; 0x0780=1920 on the 9.16", 1280 expected on the 6.86"). Height is
+        # not present — every known LY panel is 480 tall.
+        if len(resp) >= 20:
+            self.device_id = struct.unpack_from("<I", resp, 16)[0]
+        if len(resp) >= 26:
+            w = struct.unpack_from("<H", resp, 24)[0]
+            if 240 <= w <= 4096:
+                self.panel_width = w
 
     # -- frame -------------------------------------------------------------
     def _build_chunks(self, frame: bytes) -> List[bytes]:

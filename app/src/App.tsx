@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type Konva from 'konva'
 import {
   Upload, RotateCcw, MonitorCog, Palette,
@@ -7,21 +7,22 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from 'lucide-react'
-import DashboardStage, { type LcdToast } from './DashboardStage'
+import DashboardStage from './DashboardStage'
 import { useBackend } from './useBackend'
-import { compositorStalled } from './rafShim'
 import { useAnimatedImage } from './useAnimatedImage'
 import { useAudioSpectrum } from './useAudioSpectrum'
 import { IDB_BG, IDB_BG_VIDEO, saveBgMedia, saveBgVideo } from './bgStore'
-import {
-  PANEL_W, PANEL_H, defaultLayout,
-  type Layout, type Widget, type Sensors,
-} from './types'
-import { LS_KEY, loadLayout } from './layoutStore'
+import { PANEL_W, PANEL_H, defaultLayout, type Sensors } from './types'
+import { LS_KEY } from './layoutStore'
 import { fileToDataUrl } from './imageUtils'
-import { remapWidgetForRotation, clampWidget, widgetBounds } from './widgetGeometry'
+import { remapWidgetForRotation, clampWidget } from './widgetGeometry'
 import { LayoutGroup, motion } from 'motion/react'
 import { useSmoothedSensors } from './hooks/useSmoothedSensors'
+import { useLayoutHistory } from './hooks/useLayoutHistory'
+import { useWidgetOps, newId } from './hooks/useWidgetOps'
+import { useEditorShortcuts } from './hooks/useEditorShortcuts'
+import { useToasts } from './hooks/useToasts'
+import { useStreamPipeline } from './hooks/useStreamPipeline'
 import { WidgetProps } from './components/WidgetProps'
 import { Presets } from './components/Presets'
 import { LayerPanel } from './components/LayerPanel'
@@ -34,53 +35,15 @@ import { useT } from './i18n'
 import pkg from '../package.json'
 import './App.css'
 
-let idc = 0
-const newId = (t: string) => `${t}-${Date.now()}-${idc++}`
-
 export default function App() {
   const t = useT()
   const backend = useBackend()
-  // Stable reference — the stream interval effect must NOT depend on `backend`
+  // Stable reference — the stream pipeline effect must NOT depend on `backend`
   // itself (new object every render; with an animated bg re-rendering at 20fps
-  // the interval would be torn down before it ever fires).
+  // the pipeline would be torn down before it ever fires).
   const { sendFrame } = backend
-  const [layout, setLayout] = useState<Layout>(loadLayout)
+  const { layout, layoutRef, commit, undo, redo } = useLayoutHistory()
   const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  // --- undo/redo -----------------------------------------------------------
-  // All layout mutations go through commit() (never bare setLayout), which
-  // snapshots the previous state. layoutRef keeps commit() usable from stable
-  // callbacks without re-subscribing keyboard handlers on every edit.
-  const layoutRef = useRef(layout)
-  layoutRef.current = layout
-  const past = useRef<Layout[]>([])
-  const future = useRef<Layout[]>([])
-
-  const commit = useCallback((fn: (l: Layout) => Layout) => {
-    const cur = layoutRef.current
-    const next = fn(cur)
-    if (next === cur) return
-    past.current = [...past.current.slice(-99), cur]
-    future.current = []
-    layoutRef.current = next
-    setLayout(next)
-  }, [])
-
-  const undo = useCallback(() => {
-    const p = past.current.pop()
-    if (!p) return
-    future.current.push(layoutRef.current)
-    layoutRef.current = p
-    setLayout(p)
-  }, [])
-
-  const redo = useCallback(() => {
-    const f = future.current.pop()
-    if (!f) return
-    past.current.push(layoutRef.current)
-    layoutRef.current = f
-    setLayout(f)
-  }, [])
   const [now, setNow] = useState(new Date())
   const [streaming, setStreaming] = useState(true)
   const [measuredFps, setMeasuredFps] = useState(0)
@@ -93,13 +56,15 @@ export default function App() {
   const inspectorRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.5)
   const { frame: bgEl, fps: bgFps } = useAnimatedImage(layout.bgImage)
-  // User-set fps ceiling ('auto' = the classic 20fps animation cap). The
-  // adaptive logic below stays — this only moves its upper bound.
+  // User-set fps ceiling ('auto' = 30fps animation cap). The adaptive logic
+  // below stays — this only moves its upper bound. 30 is comfortably inside
+  // the panel's measured USB capacity (avg ~12ms/frame, i.e. ~80fps) and
+  // absorbs GIFs up to their 30fps decode cap without pulldown.
   const [maxFps, setMaxFps] = useState<number | 'auto'>(() => {
     const v = localStorage.getItem('lcd-maxfps')
     return v && v !== 'auto' && Number.isFinite(+v) ? +v : 'auto'
   })
-  const fpsCeiling = maxFps === 'auto' ? 20 : maxFps
+  const fpsCeiling = maxFps === 'auto' ? 30 : maxFps
   // Stream rate follows the content: static layouts only change at 1Hz (clock /
   // sensors), animated backgrounds stream at their native frame rate (capped).
   const targetFps = Math.min(bgFps ?? 1, fpsCeiling)
@@ -115,34 +80,20 @@ export default function App() {
       ? (layout.panelRotate ?? 0)
       : (((((layout.panelRotate ?? (layout.rotate180 === false ? 0 : 180)) + 180) % 360)) as 0 | 90 | 180 | 270)
   const isPortrait = panelRotate === 90 || panelRotate === 270
-  const logicalW = isPortrait ? PANEL_H : PANEL_W
-  const logicalH = isPortrait ? PANEL_W : PANEL_H
+  // Physical panel size: self-reported by the device handshake (1280x480 on
+  // the 6.86" model), constants until the backend reports one.
+  const panelW = backend.panel?.w ?? PANEL_W
+  const panelH = backend.panel?.h ?? PANEL_H
+  const logicalW = isPortrait ? panelH : panelW
+  const logicalH = isPortrait ? panelW : panelH
 
   // Smoothed sensor values drive the LCD widgets (raw 1Hz values feed history).
   const { display: displaySensors } = useSmoothedSensors(backend.sensors)
 
   // --- Windows toast overlay ------------------------------------------------
-  const TOAST_MS = 8000
   const [notifyEnabled, setNotifyEnabled] = useState(
     () => localStorage.getItem('lcd-notify') !== 'off')
-  const [toasts, setToasts] = useState<LcdToast[]>([])
-  const pushToast = useCallback((t: Omit<LcdToast, 'born' | 'until' | 'total'>) => {
-    setToasts((ts) => [...ts.slice(-4),
-      { ...t, born: Date.now(), until: Date.now() + TOAST_MS, total: TOAST_MS }])
-  }, [])
-  useEffect(() => {
-    const n = backend.notification
-    if (n && notifyEnabled) pushToast(n)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend.notification])
-  useEffect(() => {
-    if (!toasts.length) return
-    // always a fresh array: this tick doubles as the animation clock for the
-    // toast slide/fade (re-render → new eased positions → streamed frame)
-    const t = setInterval(() =>
-      setToasts((ts) => ts.filter((x) => x.until > Date.now()).slice()), 50)
-    return () => clearInterval(t)
-  }, [toasts.length])
+  const { toasts, pushToast } = useToasts(backend.notification, notifyEnabled)
   // Loopback audio spectrum — captured only while a visualizer widget exists.
   // The backend delivers frames at the fps ceiling so 60fps mode is real 60.
   const hasVisualizer = layout.widgets.some((w) => w.type === 'visualizer')
@@ -238,345 +189,27 @@ export default function App() {
     return () => ro.disconnect()
   }, [logicalW, logicalH, isPortrait])
 
-  // Reused offscreen canvas for the panel-rotation compositing (editor stays
-  // in logical coords; this canvas is the physical 1920×480 hardware buffer).
-  const rotCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  // Keep dynamic parameters in refs so the long-lived capture pipeline reads
-  // the latest value without re-running the effect on every render.
-  const fpsCeilingRef = useRef(fpsCeiling)
-  const panelRotateRef = useRef<0 | 90 | 180 | 270>(panelRotate)
-  const linkRef = useRef(backend.link)
-  fpsCeilingRef.current = fpsCeiling
-  panelRotateRef.current = panelRotate
-  linkRef.current = backend.link
-
-  useEffect(() => {
-    if (!streaming) return
-    // Draw-driven capture: the LCD gets a frame when (and only when) the
-    // content layer actually redrew — GIF flip, sensor easing, toast motion,
-    // visualizer bands, editor drags. A free-running timer here caused the
-    // long-standing judder: sampling a 20fps GIF with an independent 30/60fps
-    // clock duplicates/skips source frames on a drifting beat, and even at a
-    // matched 20/20 the two clocks slid past each other (periodic dropped
-    // frame). Phase-locking capture to the redraw removes the beat entirely;
-    // fpsCeiling only acts as a throttle.
-    let cancelled = false
-    // measuredFps is a rolling 1-second window (frames emitted / window
-    // duration), not a cumulative session average — otherwise a rate change
-    // (5→60) takes tens of seconds to converge and any earlier stall gets
-    // baked into the reported number forever.
-    let winStart = performance.now()
-    let winFrames = 0
-    let lastCap = 0        // when the last capture started (throttle anchor)
-    let dirty = false      // a redraw happened since the last capture
-    let encoding = false   // JPEG encode in flight — captures are serialized
-    let trailing: ReturnType<typeof setTimeout> | null = null
-
-    const capture = () => {
-      const stage = stageRef.current
-      if (!stage) return
-      lastCap = performance.now()
-      // Skip encoding entirely if the backend socket is dead — sendFrame
-      // would drop the bytes anyway. The keepalive below pushes a frame
-      // shortly after reconnect. Reset the rolling window so downtime
-      // doesn't drag the reported fps down after reconnect.
-      if (linkRef.current !== 'open') {
-        winStart = performance.now()
-        winFrames = 0
-        return
-      }
-      const l = layoutRef.current
-      const contrast = l.lcdContrast ?? 1
-      const saturation = l.lcdSaturation ?? 1
-      const brightness = l.lcdBrightness ?? 1
-      const needsFilter = contrast !== 1 || saturation !== 1 || brightness !== 1
-      const src = stage.getLayers()[0].getCanvas()._canvas
-      let rc = rotCanvasRef.current
-      if (!rc) {
-        rc = document.createElement('canvas')
-        rc.width = PANEL_W
-        rc.height = PANEL_H
-        rotCanvasRef.current = rc
-      }
-      const ctx = rc.getContext('2d')!
-      ctx.save()
-      if (needsFilter) {
-        ctx.filter = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`
-      }
-      // Convert UI-facing rotation to hardware rotation: the panel is
-      // physically mounted 180° out from what the user sees, so we always
-      // add 180° when emitting to the LCD buffer.
-      const rot = ((panelRotateRef.current + 180) % 360) as 0 | 90 | 180 | 270
-      switch (rot) {
-        case 0:
-          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
-          break
-        case 90:
-          ctx.translate(PANEL_W, 0)
-          ctx.rotate(Math.PI / 2)
-          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_H, PANEL_W)
-          break
-        case 180:
-          ctx.translate(PANEL_W, PANEL_H)
-          ctx.rotate(Math.PI)
-          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
-          break
-        case 270:
-          ctx.translate(0, PANEL_H)
-          ctx.rotate(-Math.PI / 2)
-          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_H, PANEL_W)
-          break
-        default:
-          // Corrupt panelRotate (e.g. imported preset with a stray 45°) — fall
-          // back to identity so we still emit A frame rather than a blank one.
-          ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, PANEL_W, PANEL_H)
-          break
-      }
-      ctx.restore()
-
-      const deliver = (bytes: Uint8Array<ArrayBuffer>) => {
-        // Count only frames the socket accepted — backpressure drops must not
-        // inflate the reported rate.
-        if (!sendFrame(bytes)) return
-        const p = performance.now()
-        winFrames++
-        if (p - winStart >= 1000) {
-          setMeasuredFps(Math.round(winFrames * 1000 / (p - winStart) * 10) / 10)
-          winStart = p
-          winFrames = 0
-        }
-      }
-      encoding = true
-      const done = () => { encoding = false; pump() }
-      if (compositorStalled()) {
-        // Hidden window (tray-resident logon start): Chromium schedules the
-        // async encoders (toBlob / OffscreenCanvas.convertToBlob) as idle
-        // tasks, and a hidden renderer only reaches them ~once per second —
-        // the loop serialized on the callback, so the LCD froze to ~1fps
-        // until the editor was opened. Synchronous toDataURL (~20ms) is
-        // immune; the base64 detour only runs while the window is hidden.
-        const url = rc.toDataURL('image/jpeg', 0.72)
-        const bin = atob(url.slice(url.indexOf(',') + 1))
-        const bytes = new Uint8Array(bin.length)
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-        deliver(bytes)
-        done()
-      } else {
-        rc.toBlob(async (blob) => {
-          if (cancelled) return
-          if (blob) {
-            const buf = await blob.arrayBuffer()
-            if (cancelled) return
-            deliver(new Uint8Array(buf))
-          }
-          done()
-        }, 'image/jpeg', 0.72)
-      }
-    }
-
-    // Throttle-with-trailing at the fps ceiling: a redraw inside the
-    // min-interval isn't dropped, it's captured the moment the interval
-    // elapses (the canvas then holds the newest content). The 4ms tolerance
-    // absorbs timer jitter so a 20fps GIF against a 20fps ceiling never
-    // defers a whole extra period.
-    const pump = () => {
-      if (cancelled || !dirty || encoding) return
-      const minInterval = 1000 / Math.max(1, fpsCeilingRef.current)
-      const wait = lastCap + minInterval - performance.now()
-      if (wait > 4) {
-        if (!trailing) trailing = setTimeout(() => { trailing = null; pump() }, wait)
-        return
-      }
-      dirty = false
-      capture()
-      if (!encoding) pump() // capture bailed (no stage / link down) — don't stall
-    }
-    const onDraw = () => { dirty = true; pump() }
-
-    // The content layer persists (Stage has no key), but re-bind defensively
-    // from the keepalive in case react-konva ever recreates it.
-    let boundLayer: Konva.Layer | null = null
-    const bind = () => {
-      const layer = stageRef.current?.getLayers()[0] ?? null
-      if (layer === boundLayer) return
-      boundLayer?.off('draw.stream')
-      boundLayer = layer
-      layer?.on('draw.stream', onDraw)
-    }
-    bind()
-    onDraw() // first frame right away
-
-    // ~1Hz keepalive: fully-static scenes and backend reconnects still get a
-    // frame even though nothing redraws.
-    const keep = setInterval(() => {
-      bind()
-      if (performance.now() - lastCap > 1000) { dirty = true; pump() }
-    }, 250)
-
-    return () => {
-      cancelled = true
-      clearInterval(keep)
-      if (trailing) clearTimeout(trailing)
-      boundLayer?.off('draw.stream')
-    }
-  }, [streaming, sendFrame])
+  // Draw-driven LCD capture (throttled at fpsCeiling, rotation/filter
+  // compositing, hidden-window sync-encode fallback) — see useStreamPipeline.
+  useStreamPipeline({
+    streaming, sendFrame, stageRef, layoutRef,
+    link: backend.link, fpsCeiling, panelRotate, panelW, panelH,
+    onMeasuredFps: setMeasuredFps,
+  })
 
   const selected = useMemo(
     () => layout.widgets.find((w) => w.id === selectedId) ?? null,
     [layout, selectedId],
   )
 
-  const update = useCallback((id: string, patch: Partial<Widget>) => {
-    commit((l) => ({
-      ...l,
-      widgets: l.widgets.map((w) => (w.id === id ? { ...w, ...patch } as Widget : w)),
-    }))
-  }, [commit])
+  // Widget mutations (add/move/resize/z-order/align/...), all routed through
+  // the undo history's commit(). Stable callbacks — safe for the keyboard hook.
+  const {
+    selectedIdRef, update, move, resize, addWidget, del, duplicate,
+    reorder, reorderOne, deleteById, align, nudge,
+  } = useWidgetOps({ commit, layoutRef, logicalW, logicalH, selectedId, setSelectedId })
 
-  const move = useCallback((id: string, x: number, y: number) => update(id, { x, y }), [update])
-
-  // Absorb transformer scale into each widget's own size fields.
-  const resize = useCallback((id: string, sx: number, sy: number, x: number, y: number) => {
-    commit((l) => ({
-      ...l,
-      widgets: l.widgets.map((w) => {
-        if (w.id !== id) return w
-        const base = { ...w, x, y }
-        switch (w.type) {
-          case 'text': case 'clock': case 'sensor':
-            return { ...base, fontSize: Math.max(10, Math.round(w.fontSize * sy)) } as Widget
-          case 'gauge':
-            return { ...base, size: Math.max(60, Math.round(w.size * sx)) } as Widget
-          case 'bar': case 'image': case 'graph': case 'media': case 'weather':
-          case 'visualizer':
-            return {
-              ...base,
-              width: Math.max(20, Math.round(w.width * sx)),
-              height: Math.max(10, Math.round(w.height * sy)),
-            } as Widget
-        }
-      }),
-    }))
-  }, [commit])
-
-  const addWidget = useCallback((w: Widget) => {
-    // WidgetPalette factories hardcode landscape (1920×480) spawn coords.
-    // Clamp against the current logical canvas so portrait users don't get
-    // widgets spawning off-canvas at x=800 or x=510.
-    const clamped = clampWidget(w, logicalW, logicalH)
-    commit((l) => ({ ...l, widgets: [...l.widgets, clamped] }))
-    setSelectedId(clamped.id)
-  }, [commit, logicalW, logicalH])
-
-  const selectedIdRef = useRef(selectedId)
-  selectedIdRef.current = selectedId
-
-  const del = useCallback(() => {
-    const id = selectedIdRef.current
-    if (!id) return
-    commit((l) => ({ ...l, widgets: l.widgets.filter((w) => w.id !== id) }))
-    setSelectedId(null)
-  }, [commit])
-
-  const duplicate = useCallback(() => {
-    const id = selectedIdRef.current
-    if (!id) return
-    const src = layoutRef.current.widgets.find((w) => w.id === id)
-    if (!src) return
-    const copy = { ...src, id: newId(src.type), x: src.x + 24, y: src.y + 24 }
-    commit((l) => ({ ...l, widgets: [...l.widgets, copy] }))
-    setSelectedId(copy.id)
-  }, [commit])
-
-  // Render order = array order; front/back moves the widget to either end.
-  const reorder = useCallback((dir: 'front' | 'back') => {
-    const id = selectedIdRef.current
-    if (!id) return
-    commit((l) => {
-      const w = l.widgets.find((x) => x.id === id)
-      if (!w) return l
-      const rest = l.widgets.filter((x) => x.id !== id)
-      return { ...l, widgets: dir === 'front' ? [...rest, w] : [w, ...rest] }
-    })
-  }, [commit])
-
-  // Move a specific widget one step in z-order (LayerPanel row arrows).
-  // 'up' = closer to viewer = higher array index.
-  const reorderOne = useCallback((id: string, dir: 'up' | 'down') => {
-    commit((l) => {
-      const idx = l.widgets.findIndex((x) => x.id === id)
-      if (idx < 0) return l
-      const target = dir === 'up' ? idx + 1 : idx - 1
-      if (target < 0 || target >= l.widgets.length) return l
-      const arr = l.widgets.slice()
-      const [w] = arr.splice(idx, 1)
-      arr.splice(target, 0, w)
-      return { ...l, widgets: arr }
-    })
-  }, [commit])
-
-  const deleteById = useCallback((id: string) => {
-    commit((l) => ({ ...l, widgets: l.widgets.filter((w) => w.id !== id) }))
-    if (selectedIdRef.current === id) setSelectedId(null)
-  }, [commit])
-
-  // Align the selected widget against the logical canvas edges/center.
-  // widgetBounds is an estimate for text-like widgets (same approximation
-  // the clamp path already relies on), exact for box-sized widgets.
-  const align = useCallback((mode: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
-    const id = selectedIdRef.current
-    if (!id) return
-    commit((l) => ({
-      ...l,
-      widgets: l.widgets.map((w) => {
-        if (w.id !== id) return w
-        const b = widgetBounds(w)
-        switch (mode) {
-          case 'left': return { ...w, x: 0 }
-          case 'hcenter': return { ...w, x: Math.round((logicalW - b.w) / 2) }
-          case 'right': return { ...w, x: Math.round(logicalW - b.w) }
-          case 'top': return { ...w, y: 0 }
-          case 'vcenter': return { ...w, y: Math.round((logicalH - b.h) / 2) }
-          case 'bottom': return { ...w, y: Math.round(logicalH - b.h) }
-        }
-      }),
-    }))
-  }, [commit, logicalW, logicalH])
-
-  const nudge = useCallback((dx: number, dy: number) => {
-    const id = selectedIdRef.current
-    if (!id) return
-    commit((l) => ({
-      ...l,
-      widgets: l.widgets.map((w) => (w.id === id ? { ...w, x: w.x + dx, y: w.y + dy } : w)),
-    }))
-  }, [commit])
-
-  // Keyboard shortcuts: arrows nudge (Shift = 10px), Delete removes,
-  // Ctrl+D duplicates, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo.
-  // Suppressed while a modal (bg editor, first-run wizard) is open — the
-  // modal owns keyboard focus and any Delete/Ctrl+Z hitting through to the
-  // underlying layout would silently destroy work.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Any modal open? Editor / wizard block the whole shortcut set.
-      if (document.querySelector('.bg-editor-backdrop, .wizard-backdrop')) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
-      const k = e.key.toLowerCase()
-      if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return }
-      if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return }
-      if (!selectedIdRef.current) return
-      if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); duplicate(); return }
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return }
-      const step = e.shiftKey ? 10 : 1
-      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
-      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
-      if (dx || dy) { e.preventDefault(); nudge(dx, dy) }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, del, duplicate, nudge])
+  useEditorShortcuts({ undo, redo, del, duplicate, nudge, selectedIdRef })
 
   return (
     <div className="app">
@@ -755,8 +388,8 @@ export default function App() {
                 const willBePortrait = v === 90 || v === 270
                 const aspectFlipped = wasPortrait !== willBePortrait
                 const rotDeltaCW = (((v - panelRotate) + 360) % 360) as 0 | 90 | 180 | 270
-                const nextLW = willBePortrait ? PANEL_H : PANEL_W
-                const nextLH = willBePortrait ? PANEL_W : PANEL_H
+                const nextLW = willBePortrait ? panelH : panelW
+                const nextLH = willBePortrait ? panelW : panelH
                 commit((l) => ({
                   ...l,
                   panelRotate: v,

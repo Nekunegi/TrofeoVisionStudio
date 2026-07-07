@@ -52,6 +52,10 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
     let dec: any = null
     let buffers: [HTMLCanvasElement, HTMLCanvasElement] | null = null
     let flip = 0
+    // Prefetched-but-not-yet-shown frame (GIF path); hoisted to effect scope
+    // so cleanup can close it.
+    let pending: VideoFrame | null = null
+    let pendingDurMs = 0
 
     // Blit the frame into the least-recently-shown buffer and release it.
     // Alternating canvas references also makes react-konva redraw the layer.
@@ -188,27 +192,43 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
           return
         }
 
-        let durMs = (first.image.duration ?? 100000) / 1000 // µs -> ms
+        const durMs = (first.image.duration ?? 100000) / 1000 // µs -> ms
         setFps(Math.min(30, Math.max(1, Math.round(1000 / Math.max(durMs, 10)))))
         show(first.image)
 
+        // Prefetch: the NEXT frame is decoded while the current one is on
+        // screen, so at the deadline it flips instantly instead of arriving
+        // late by the decode time (one extra in-flight VideoFrame, ~4MB).
         let idx = 0
         let nextAt = performance.now() + durMs
         let decoding = false
+        const prefetch = () => {
+          if (decoding || pending) return
+          decoding = true
+          const next = (idx + 1) % count
+          dec.decode({ frameIndex: next }).then(({ image }: { image: VideoFrame }) => {
+            decoding = false
+            if (cancelled) { image.close(); return }
+            idx = next
+            pending = image
+            pendingDurMs = (image.duration ?? 50000) / 1000
+          }).catch(() => { decoding = false })
+        }
+        prefetch()
         const tick = (t: number) => {
           if (cancelled) return
-          if (t >= nextAt && !decoding) {
-            decoding = true
-            idx = (idx + 1) % count
-            dec.decode({ frameIndex: idx }).then(({ image }: { image: VideoFrame }) => {
-              decoding = false
-              if (cancelled) { image.close(); return }
-              durMs = (image.duration ?? 50000) / 1000
-              nextAt += durMs
+          if (t >= nextAt) {
+            if (pending) {
+              const image = pending
+              pending = null
+              nextAt += pendingDurMs
               // resync after a long stall (window hidden without throttling off, etc.)
-              if (performance.now() - nextAt > 1000) nextAt = performance.now() + durMs
+              if (performance.now() - nextAt > 1000) nextAt = performance.now() + pendingDurMs
               show(image)
-            }).catch(() => { decoding = false })
+            }
+            // decode the frame after the one just shown — or retry after a
+            // failed/slow decode left the deadline with nothing pending
+            prefetch()
           }
           raf = requestAnimationFrame(tick)
         }
@@ -222,6 +242,8 @@ export function useAnimatedImage(src: string | null): AnimatedImage {
     return () => {
       cancelled = true
       cancelAnimationFrame(raf)
+      pending?.close()
+      pending = null
       dec?.close?.()
       if (vid) {
         const AnyVid = vid as HTMLVideoElement & { cancelVideoFrameCallback?: (h: number) => void }

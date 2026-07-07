@@ -13,6 +13,10 @@ import math
 import threading
 import time
 
+from .log import get_logger
+
+log = get_logger("trofeo.audio")
+
 BANDS = 96
 F_LO = 40.0
 F_HI = 16000.0
@@ -62,17 +66,25 @@ class SpectrumCapture:
             import pyaudiowpatch as pyaudio
         except Exception as e:
             self.status = f"error: audio deps missing ({e})"
+            log.warning("[audio] %s", self.status)
             self._run = False
             return
 
+        last_err = None
         while self._run:
             try:
                 p = pyaudio.PyAudio()
                 try:
                     self._capture(p, np, pyaudio)
+                    last_err = None
                 finally:
                     p.terminate()
             except Exception as e:
+                # log state changes only — this retries every ~5s and a missing
+                # audio endpoint would otherwise flood backend.log
+                if str(e) != last_err:
+                    last_err = str(e)
+                    log.warning("[audio] capture failed (will retry): %s", e)
                 self.status = f"error: {e}"
                 self.bands = [0.0] * BANDS
                 self.audible = False
@@ -109,8 +121,8 @@ class SpectrumCapture:
             buf = np.zeros(FFT_N, dtype=np.float32)
             smooth = np.zeros(FFT_N // 2 + 1, dtype=np.float32)
             self.status = "ok"
-            print(f"[audio] loopback capture on '{dev['name']}' "
-                  f"({rate}Hz x{ch})", flush=True)
+            log.info("[audio] loopback capture on '%s' (%dHz x%d)",
+                     dev["name"], rate, ch)
             silent_since = None
             while self._run:
                 raw = stream.read(READ_FRAMES, exception_on_overflow=False)
@@ -148,7 +160,9 @@ class SpectrumCapture:
                     try:
                         cb()
                     except Exception:
-                        pass
+                        # a broken pacing callback degrades sends to timer
+                        # pacing but must not kill the capture thread
+                        log.debug("[audio] on_update callback failed", exc_info=True)
                 # long silence may mean the default device changed under us —
                 # reopen (bands are zero anyway, so the gap is invisible)
                 if audible:

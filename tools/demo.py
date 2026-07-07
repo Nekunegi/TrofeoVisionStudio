@@ -9,7 +9,8 @@ Usage:
   python demo.py image.png  # send an image file
 """
 
-import sys, pathlib
+import sys
+import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 # libusb-package ships the libusb-1.0 DLL and registers it as the pyusb backend.

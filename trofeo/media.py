@@ -11,6 +11,10 @@ from __future__ import annotations
 import base64
 import time
 
+from .log import get_logger
+
+log = get_logger("trofeo.media")
+
 THUMB_MAX_BYTES = 1_500_000
 # Art often becomes available a moment after the track-change event — retry a
 # few polls before giving up on the current track.
@@ -156,7 +160,10 @@ class MediaWatcher:
             except Exception:
                 pass
             return f"data:{ctype};base64,{base64.b64encode(raw).decode()}"
-        except Exception:
+        except Exception as e:
+            # benign and common right after a track change (art not ready yet);
+            # poll() retries a few times, so debug level is enough
+            log.debug("[media] thumbnail read failed: %s", e)
             return None
         finally:
             try:

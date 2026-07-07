@@ -8,6 +8,10 @@ Settings > Privacy & security > Notifications ("notification access").
 
 from __future__ import annotations
 
+from .log import get_logger
+
+log = get_logger("trofeo.notifications")
+
 
 class NotificationWatcher:
     """Async poller: start() once, then poll() returns only NEW toasts."""
@@ -60,15 +64,17 @@ class NotificationWatcher:
             app = ""
             try:
                 app = n.app_info.display_info.display_name
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("[notify] app name lookup failed for id %s: %s", n.id, e)
             texts: list[str] = []
             try:
                 binding = n.notification.visual.get_binding(self._binding_key)
                 if binding:
                     texts = [t.text for t in binding.get_text_elements() if t.text]
-            except Exception:
-                pass
+            except Exception as e:
+                # some apps post toasts without a toast_generic binding — the
+                # toast still shows on the LCD, just with empty title/body
+                log.debug("[notify] text extraction failed for id %s: %s", n.id, e)
             out.append({
                 "id": int(n.id),
                 "app": app,

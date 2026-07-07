@@ -5,7 +5,8 @@ reply and the post-frame ACK and scan them for the device's native resolution
 and any status codes.
 """
 
-import sys, pathlib
+import sys
+import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import libusb_package

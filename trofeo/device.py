@@ -7,6 +7,8 @@ device but claiming the interface / bulk transfers will fail.
 
 from __future__ import annotations
 
+import os
+
 import usb.core
 import usb.util
 
@@ -22,8 +24,12 @@ except Exception:  # pragma: no cover
 
 # Trofeo Vision 9.16 LCD. Confirmed present on this machine as:
 #   USBDISPLAY  USB\VID_0416&PID_5408\...
-VID = 0x0416
+# The 6.86" model reportedly enumerates as PID 0x5302 (same LY bulk protocol,
+# 1280x480 panel) — untested on real hardware, so keep 5408 first. A unit with
+# yet another PID can opt in via TROFEO_PID (hex or decimal).
+VID = int(os.environ.get("TROFEO_VID", "0x0416"), 0)
 PID = 0x5408
+KNOWN_PIDS = (0x5408, 0x5302)
 
 # Endpoint addresses from the protocol doc: "EP09 OUT" / "EP01 IN".
 # OUT endpoint number 9 -> address 0x09; IN endpoint number 1 -> address 0x81.
@@ -47,10 +53,17 @@ class TrofeoDevice:
 
     @classmethod
     def open(cls) -> "TrofeoDevice":
-        dev = usb.core.find(idVendor=VID, idProduct=PID, backend=_BACKEND)
+        env_pid = os.environ.get("TROFEO_PID")
+        pids = (int(env_pid, 0),) if env_pid else KNOWN_PIDS
+        dev = None
+        for pid in pids:
+            dev = usb.core.find(idVendor=VID, idProduct=pid, backend=_BACKEND)
+            if dev is not None:
+                break
         if dev is None:
+            wanted = "/".join(f"{VID:04x}:{p:04x}" for p in pids)
             raise DeviceError(
-                f"Device {VID:04x}:{PID:04x} not found. Is it plugged in? "
+                f"Device {wanted} not found. Is it plugged in? "
                 "On Windows, is the WinUSB driver installed via Zadig?"
             )
         self = cls(dev)

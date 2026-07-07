@@ -1,0 +1,10 @@
+# Correctness-only lint gate (pyflakes + pycodestyle errors — ruff's default
+# rule set). Style is intentionally not enforced.
+target-version = "py312"
+
+[lint.per-file-ignores]
+# server.py initializes the libusb backend / logging before the trofeo
+# imports that depend on them; tools/*.py bootstrap sys.path to reach the
+# repo-root `trofeo` package. Both make top-of-file import order impossible.
+"server.py" = ["E402"]
+"tools/*.py" = ["E402"]

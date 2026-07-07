@@ -6,6 +6,38 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-07-07
+
+### Added
+- **Panel size auto-detection.** The device handshake reply self-reports the
+  panel width; the backend now parses it, sizes the frame pipeline from it and
+  forwards it to the editor (`status` message gains `width`/`height`). The
+  6.86" model (1280×480, PID `0x5302`) is now probed automatically —
+  experimental, untested on real hardware; `TROFEO_PID` / `TROFEO_WIDTH` /
+  `TROFEO_HEIGHT` env vars override the detection if a unit reports wrongly.
+- **Timestamped backend logging.** `backend.log` lines now carry a time prefix
+  (previously fps/latency forensics had to be inferred from unrelated periodic
+  events). `TROFEO_LOGLEVEL=debug` enables per-poll diagnostics; failures that
+  used to be silently swallowed (media thumbnails, toast parsing, audio
+  capture retries) are now logged.
+- Backend USB failure recovery (reset → reopen → retry) and the panel-size
+  self-report are covered by tests (`tests/test_device_manager.py`); the
+  editor gains tests for widget geometry (clamp / rotation remap) and the
+  Layers panel.
+- CI runs `ruff` (correctness lint) over the Python backend.
+- README documents all `TROFEO_*` environment variables.
+
+### Changed
+- **Auto fps ceiling raised 20 → 30.** Live USB telemetry (v1.12.0's `lcdfps`)
+  shows the 9.16" panel sustains a frame in ~12 ms on average, so Auto no
+  longer downsamples 21–30 fps GIF/video backgrounds.
+- **Animated backgrounds prefetch the next frame** while the current one is
+  displayed, removing the per-frame decode delay from the presentation time
+  (one extra in-flight frame, ~4 MB).
+- Editor internals: the 921-line `App.tsx` was split into focused hooks
+  (`useStreamPipeline`, `useLayoutHistory`, `useWidgetOps`,
+  `useEditorShortcuts`, `useToasts`) — no behavior change.
+
 ## [1.12.0] — 2026-07-06
 
 ### Fixed

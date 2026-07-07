@@ -131,6 +131,33 @@ def test_handshake_packet_shape():
     assert packet[16:] == b'\x00' * 2032
 
 
+def test_handshake_parses_panel_self_report():
+    """The reply carries device id (u32 LE @16) and panel width (u16 LE @24)."""
+    dev = FakeDevice()
+
+    def read(size=512, timeout=2000):
+        ack = bytearray(size)
+        ack[0] = 0x03
+        ack[1] = 0xFF
+        ack[8] = 0x01
+        struct.pack_into('<I', ack, 16, 0x7CEE3563)
+        struct.pack_into('<H', ack, 24, 1920)
+        return bytes(ack)
+
+    dev.read = read  # type: ignore
+    proto = LyProtocol(dev)
+    proto.handshake()
+    assert proto.device_id == 0x7CEE3563
+    assert proto.panel_width == 1920
+
+
+def test_handshake_ignores_implausible_width():
+    """Zero / garbage width must not be trusted (caller falls back to 1920)."""
+    proto = LyProtocol(FakeDevice())  # default reply has width bytes = 0
+    proto.handshake()
+    assert proto.panel_width is None
+
+
 def test_handshake_rejects_bad_ack():
     """A device that answers with the wrong magic must raise."""
     dev = FakeDevice()

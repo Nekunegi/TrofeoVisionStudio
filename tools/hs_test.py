@@ -1,6 +1,7 @@
 """Handshake-only test: prove two-way bulk comms without changing the display."""
 
-import sys, pathlib
+import sys
+import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import libusb_package
