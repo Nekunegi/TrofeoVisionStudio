@@ -30,6 +30,7 @@ import { WidgetPalette } from './components/WidgetPalette'
 import { FirstRunWizard } from './components/FirstRunWizard'
 import { UpdateBell } from './components/UpdateBell'
 import { LangToggle } from './components/LangToggle'
+import { ThemeToggle } from './components/ThemeToggle'
 import { BgEditorModal } from './components/BgEditorModal'
 import { useT } from './i18n'
 import pkg from '../package.json'
@@ -327,6 +328,7 @@ export default function App() {
             <span className="track" />
             {t('header.stream')}
           </label>
+          <ThemeToggle />
           <LangToggle />
           <UpdateBell />
         </div>

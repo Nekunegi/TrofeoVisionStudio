@@ -1,26 +1,85 @@
-/* Editor design system — dark, glassy, cyan-accented. */
+/* Editor design system — neumorphism (soft UI), dark + light themes.
+ *
+ * One surface color everywhere; depth comes from paired shadows
+ * (light from top-left, dark from bottom-right). Raised = convex
+ * controls/cards, inset = inputs and pressed states. Borders are
+ * (near-)invisible — state feedback uses text/tint color instead.
+ *
+ * Every theme-dependent value lives in a :root variable; the light
+ * theme only swaps variables (html[data-theme='light'], set by
+ * src/theme.ts). Accent tints are derived with color-mix so they
+ * follow the per-theme accent automatically. */
 
 :root {
-  --bg: #0b0d12;
-  --bg-2: #10131b;
-  --bg-3: #161a24;
-  --bg-input: #0c0f16;
-  --line: #222736;
-  --line-soft: #1a1e2b;
+  --bg: #232837;
+  --bg-2: #232837;
+  --bg-3: #262b3a;
+  --bg-input: #1e2331;
+  --line: rgba(255, 255, 255, 0.05);
+  --line-soft: rgba(255, 255, 255, 0.03);
   --text: #e8eaf0;
-  --sub: #8a91a3;
-  --faint: #5b6274;
+  --sub: #99a0b3;
+  --faint: #6a7186;
   --accent: #4de1ff;
   --accent-2: #6c8cff;
   --ok: #3ce6a0;
   --warn: #ffc861;
   --err: #ff7a8a;
-  --radius: 14px;
+  --radius: 16px;
   /* Aliases so newer components can use conventional names without touching
    * the older var vocabulary (--sub, --text, --bg-2 stay canonical). */
   --muted: var(--sub);
   --fg: var(--text);
   --panel: var(--bg-2);
+  /* neumorphic shadow pairs */
+  --sd: rgba(9, 11, 19, 0.6);
+  --sl: rgba(255, 255, 255, 0.06);
+  --nm-raise: 6px 6px 14px var(--sd), -6px -6px 14px var(--sl);
+  --nm-raise-sm: 3px 3px 7px var(--sd), -3px -3px 7px var(--sl);
+  --nm-raise-hover: 4px 4px 9px var(--sd), -4px -4px 9px var(--sl);
+  --nm-inset: inset 4px 4px 9px var(--sd), inset -4px -4px 9px var(--sl);
+  --nm-inset-sm: inset 2px 2px 5px var(--sd), inset -2px -2px 5px var(--sl);
+  /* convex/concave surface tints (light source top-left) */
+  --convex: linear-gradient(145deg, #272c3d, #202531);
+  --concave: linear-gradient(145deg, #1f2432, #242938);
+  /* misc theme-dependent bits */
+  --hover: rgba(255, 255, 255, 0.04);
+  --amber: #ffd884;
+  --knob: linear-gradient(145deg, #3a4157, #2b3145);
+  --checker-a: #181c28;
+  --checker-b: #1f2432;
+  --scrollbar: #313749;
+  --scrollbar-hover: #3d4459;
+  --backdrop: rgba(10, 12, 19, 0.7);
+}
+
+html[data-theme='light'] {
+  --bg: #e3e8f0;
+  --bg-2: #e3e8f0;
+  --bg-3: #eaeef5;
+  --bg-input: #dbe1ec;
+  --line: rgba(30, 40, 60, 0.08);
+  --line-soft: rgba(30, 40, 60, 0.05);
+  --text: #2e3547;
+  --sub: #5f6880;
+  --faint: #8d96ab;
+  --accent: #0891b2;
+  --accent-2: #4f6ee8;
+  --ok: #0e9f6e;
+  --warn: #b45309;
+  --err: #d6455d;
+  --sd: rgba(163, 177, 198, 0.7);
+  --sl: rgba(255, 255, 255, 0.9);
+  --convex: linear-gradient(145deg, #eef2f9, #dce2ec);
+  --concave: linear-gradient(145deg, #d9dfe9, #e9edf5);
+  --hover: rgba(30, 40, 60, 0.05);
+  --amber: #93600a;
+  --knob: linear-gradient(145deg, #ffffff, #dde3ee);
+  --checker-a: #cfd6e2;
+  --checker-b: #dde3ee;
+  --scrollbar: #b9c2d3;
+  --scrollbar-hover: #a5b0c4;
+  --backdrop: rgba(40, 48, 66, 0.45);
 }
 
 * { box-sizing: border-box; }
@@ -42,8 +101,11 @@ header {
   padding: 0 18px;
   height: 52px;
   flex: none;
-  background: linear-gradient(180deg, #12151e, #0e1118);
-  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: 0 5px 14px var(--sd),
+              0 1px 0 var(--sl) inset;
+  position: relative;
+  z-index: 5;
 }
 
 .brand {
@@ -63,10 +125,10 @@ header {
   margin-left: 2px;
 }
 .brand .ver {
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
   color: var(--faint);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
@@ -82,8 +144,8 @@ header {
   font-weight: 500;
   padding: 4px 12px;
   border-radius: 999px;
-  background: var(--bg-3);
-  border: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
   color: var(--sub);
 }
 .pill .dot {
@@ -92,10 +154,10 @@ header {
   border-radius: 50%;
   background: currentColor;
 }
-.pill.open { color: var(--ok); border-color: rgba(60, 230, 160, 0.25); background: rgba(60, 230, 160, 0.08); }
+.pill.open { color: var(--ok); }
 .pill.open .dot { box-shadow: 0 0 6px currentColor; }
-.pill.closed { color: var(--err); border-color: rgba(255, 122, 138, 0.25); background: rgba(255, 122, 138, 0.08); }
-.pill.connecting { color: var(--warn); border-color: rgba(255, 200, 97, 0.25); background: rgba(255, 200, 97, 0.08); }
+.pill.closed { color: var(--err); }
+.pill.connecting { color: var(--warn); }
 .pill.connecting .dot { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
 
@@ -122,19 +184,23 @@ button:disabled, .filebtn:disabled {
   font-size: 11.5px;
 }
 .fpsmax select {
-  background: var(--bg-3);
+  background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 0;
+  box-shadow: var(--nm-inset-sm);
   border-radius: 9px;
-  padding: 3px 7px;
+  padding: 4px 8px;
   font-size: 11.5px;
   font-family: inherit;
   outline: none;
   cursor: pointer;
 }
-.fpsmax select:focus { border-color: rgba(77, 225, 255, 0.55); }
+.fpsmax select:focus {
+  box-shadow: var(--nm-inset-sm),
+              0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent);
+}
 
-/* toggle switch */
+/* toggle switch — concave track, convex knob */
 .switch {
   display: inline-flex;
   align-items: center;
@@ -149,30 +215,31 @@ button:disabled, .filebtn:disabled {
   width: 34px;
   height: 19px;
   border-radius: 999px;
-  background: var(--bg-3);
-  border: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
   position: relative;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, box-shadow 0.15s;
 }
 .switch .track::after {
   content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 3px;
+  left: 3px;
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: var(--sub);
-  transition: transform 0.15s, background 0.15s;
+  background: var(--knob);
+  box-shadow: 2px 2px 4px var(--sd), -1px -1px 2px var(--sl);
+  transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .switch input:checked + .track {
-  background: rgba(77, 225, 255, 0.22);
-  border-color: rgba(77, 225, 255, 0.5);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .switch input:checked + .track::after {
   transform: translateX(15px);
   background: var(--accent);
-  box-shadow: 0 0 8px rgba(77, 225, 255, 0.7);
+  box-shadow: 2px 2px 5px var(--sd),
+              0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 /* -------------------------------------------------------------------- body */
@@ -181,11 +248,11 @@ button:disabled, .filebtn:disabled {
 
 main {
   flex: 1;
-  padding: 14px 16px 16px;
+  padding: 16px 18px 18px;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
 }
 
@@ -201,20 +268,19 @@ main.portrait {
 main.portrait > .device { flex-shrink: 0; }
 main.portrait > .inspector { flex: 1; min-width: 0; }
 
-/* canvas framed like the physical device */
+/* canvas framed like the physical device — heavy convex slab */
 .device {
   position: relative;
-  border-radius: 22px;
+  border-radius: 24px;
   padding: 11px;
-  background: linear-gradient(180deg, #171b26, #0d1017);
-  border: 1px solid var(--line);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  background: var(--convex);
+  box-shadow: 9px 9px 22px var(--sd), -7px -7px 18px var(--sl);
 }
 .canvas-wrap {
   position: relative;
   width: 100%;
   background: #000;
-  border-radius: 13px;
+  border-radius: 14px;
   overflow: hidden;
 }
 
@@ -222,7 +288,7 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 .bg-edit-btn { margin-top: 4px; }
 
 /* Preset button strip (zoom / rotate presets in the bg editor modal). */
-.zoom-presets { gap: 5px; }
+.zoom-presets { gap: 8px; }
 .zoom-presets button {
   flex: 1;
   padding: 4px 6px;
@@ -234,10 +300,11 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 8px;
+  padding: 4px 9px;
   border-radius: 999px;
-  border: 1px solid var(--line-soft);
-  background: rgba(255, 255, 255, 0.03);
+  border: 0;
+  background: var(--bg);
+  box-shadow: var(--nm-raise-sm);
   font-size: 11px;
   cursor: pointer;
   user-select: none;
@@ -248,7 +315,7 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 .bg-editor-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--backdrop);
   backdrop-filter: blur(10px);
   z-index: 100;
   display: grid;
@@ -262,10 +329,10 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   grid-template-rows: auto 1fr auto auto;
   gap: 12px;
   padding: 18px;
-  background: rgba(20, 22, 32, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  background: var(--bg);
+  border-radius: 22px;
+  box-shadow: 0 24px 60px var(--sd),
+              0 1px 0 var(--sl) inset;
   animation: fadeUp 180ms ease-out;
 }
 .bg-editor-head {
@@ -282,18 +349,20 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 .bg-editor-close {
   margin-left: auto;
   padding: 5px 7px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  border: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--muted);
   cursor: pointer;
 }
-.bg-editor-close:hover { background: rgba(255, 255, 255, 0.05); color: var(--fg); }
+.bg-editor-close:hover { background: var(--bg); box-shadow: var(--nm-raise-sm); color: var(--fg); }
 .bg-editor-canvas-wrap {
   position: relative;
   min-height: 0;
-  border-radius: 10px;
-  background: repeating-conic-gradient(#111 0% 25%, #191b26 0% 50%) 50% 50% / 20px 20px;
+  border-radius: 12px;
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 50% 50% / 20px 20px;
+  box-shadow: var(--nm-inset-sm);
   overflow: hidden;
 }
 .bg-editor-canvas-wrap canvas {
@@ -316,32 +385,31 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 .bg-editor-controls input[type="range"] { flex: 1; }
 .bg-editor-controls .val { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted); }
 .bg-editor-controls .chip.on {
-  background: rgba(255, 200, 97, 0.14);
-  border-color: rgba(255, 200, 97, 0.4);
-  color: #ffd884;
+  box-shadow: var(--nm-inset-sm);
+  background: rgba(255, 200, 97, 0.1);
+  color: var(--amber);
 }
 .bg-editor-foot {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--line-soft);
 }
 .bg-editor-foot button {
   padding: 8px 18px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-weight: 500;
 }
 .bg-editor-ok {
-  background: linear-gradient(180deg, rgba(255, 200, 97, 0.22), rgba(255, 200, 97, 0.1));
-  border-color: rgba(255, 200, 97, 0.5);
-  color: #ffd884;
+  background: linear-gradient(145deg, rgba(255, 200, 97, 0.24), rgba(255, 200, 97, 0.08)), var(--bg);
+  color: var(--amber);
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
-.bg-editor-ok:hover { filter: brightness(1.15); }
+.bg-editor-ok:hover { filter: brightness(1.06); color: var(--amber); }
 
 /* ------------------------------------------------- inspector (below LCD) */
 
@@ -350,22 +418,21 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
    auto-balancing here never reflows while editing. */
 .inspector {
   column-width: 230px;
-  column-gap: 12px;
+  column-gap: 16px;
 }
 
 .inspector section, .side section {
-  background: var(--bg-3);
-  border: 1px solid var(--line-soft);
-  border-radius: 14px;
-  padding: 12px 13px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  background: var(--convex);
+  border-radius: 18px;
+  padding: 14px 15px;
+  box-shadow: var(--nm-raise);
   animation: fadeUp 0.3s ease both;
   min-width: 0;
   display: block;
 }
 .inspector section {
   break-inside: avoid;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 /* gentle stagger on load */
 .inspector section:nth-child(2) { animation-delay: 0.04s; }
@@ -381,10 +448,10 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   width: 288px;
   min-width: 0;
   overflow-y: auto;
-  padding: 14px 14px 16px 0;
+  padding: 16px 16px 18px 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 .side .layers { max-height: 44vh; }
 @keyframes fadeUp {
@@ -399,7 +466,7 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 .actions {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  gap: 9px;
 }
 .actions button {
   display: inline-flex;
@@ -413,26 +480,28 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 }
 .actions button svg { margin-right: 0; flex-shrink: 0; }
 
-/* alignment tools: two segmented 3-button groups */
-.align-row { gap: 7px; }
+/* alignment tools: two segmented 3-button groups in a concave well */
+.align-row { gap: 9px; }
 .btn-group {
   display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 11px;
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
+  padding: 2px;
   overflow: hidden;
 }
 .btn-group button {
   border: 0;
-  border-radius: 0;
-  padding: 6px 9px;
-  background: var(--bg-input);
+  border-radius: 9px;
+  padding: 5px 8px;
+  background: transparent;
+  box-shadow: none;
   color: var(--sub);
   line-height: 0;
 }
-.btn-group button + button { border-left: 1px solid var(--line-soft); }
 .btn-group button:hover {
   color: var(--accent);
-  background: rgba(77, 225, 255, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   transform: none;
   box-shadow: none;
 }
@@ -452,10 +521,9 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   min-width: 58px;
   text-align: center;
   padding: 2px 7px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  border-bottom-width: 2px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 7px;
+  background: var(--convex);
+  box-shadow: 2px 2px 4px var(--sd), -1px -1px 2px var(--sl);
   color: var(--text);
   font-family: ui-monospace, Menlo, monospace;
   font-size: 10px;
@@ -465,28 +533,30 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
 /* layer panel — top-of-stack first, one row per widget */
 .layers {
   list-style: none;
-  padding: 0;
+  padding: 6px;
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
   max-height: 280px;
   overflow-y: auto;
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
 }
 .layers li {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 2px 4px 2px 0;
-  background: var(--bg-input);
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  transition: border-color 0.12s, background 0.12s;
+  background: transparent;
+  border-radius: 9px;
+  transition: background 0.12s, box-shadow 0.12s;
 }
-.layers li:hover { border-color: rgba(77, 225, 255, 0.3); }
+.layers li:hover { background: var(--hover); }
 .layers li.active {
-  border-color: rgba(77, 225, 255, 0.55);
-  background: rgba(77, 225, 255, 0.06);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent) inset;
 }
 .layers .row-main {
   flex: 1;
@@ -498,6 +568,7 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   background: transparent;
   border: 0;
   border-radius: 0;
+  box-shadow: none;
   text-align: left;
   cursor: pointer;
   font-size: 12px;
@@ -525,25 +596,26 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   border-radius: 6px;
   border: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--faint);
   min-width: 22px;
 }
 .layers li button:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--hover);
   transform: none;
   box-shadow: none;
 }
 .layers li button.toggled { color: var(--accent); }
 .layers li button.danger { color: var(--err); background: transparent; }
-.layers li button.danger:hover { background: rgba(255, 122, 138, 0.12); }
+.layers li button.danger:hover { background: color-mix(in srgb, var(--err) 12%, transparent); }
 
 /* First-run wizard — modal overlay shown once on the very first launch. */
 .wizard-backdrop {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(6, 8, 12, 0.72);
+  background: var(--backdrop);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
@@ -555,11 +627,11 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   width: min(560px, 92vw);
   max-height: 90vh;
   overflow-y: auto;
-  background: linear-gradient(180deg, #141822, #10131b);
-  border: 1px solid rgba(77, 225, 255, 0.35);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6),
-              0 0 0 1px rgba(77, 225, 255, 0.08);
+  background: var(--bg);
+  border-radius: 22px;
+  box-shadow: 0 24px 60px var(--sd),
+              0 1px 0 var(--sl) inset,
+              0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
   padding: 24px 26px;
   animation: fadeUp 0.24s ease both;
 }
@@ -581,12 +653,12 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   display: flex;
   gap: 12px;
   padding: 10px 12px;
-  background: var(--bg-input);
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
+  border-radius: 12px;
 }
-.wizard-checks li.ok { border-color: rgba(60, 230, 160, 0.4); }
-.wizard-checks li.error { border-color: rgba(255, 122, 138, 0.4); }
+.wizard-checks li.ok { box-shadow: var(--nm-inset-sm), 0 0 0 1px color-mix(in srgb, var(--ok) 35%, transparent) inset; }
+.wizard-checks li.error { box-shadow: var(--nm-inset-sm), 0 0 0 1px color-mix(in srgb, var(--err) 35%, transparent) inset; }
 .wizard-checks li.pending { opacity: 0.75; }
 .wizard-checks svg { flex-shrink: 0; margin-top: 1px; }
 .wizard-checks svg.ok { color: var(--ok); }
@@ -640,21 +712,21 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   font-weight: 500;
 }
 
-/* widget palette search box */
+/* widget palette search box — concave well */
 .palette-search {
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 6px 10px;
   margin-bottom: 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  transition: border-color 0.12s, background 0.12s;
+  background: var(--bg);
+  border-radius: 11px;
+  box-shadow: var(--nm-inset-sm);
+  transition: box-shadow 0.12s, background 0.12s;
 }
 .palette-search:focus-within {
-  border-color: rgba(77, 225, 255, 0.55);
-  background: rgba(77, 225, 255, 0.04);
+  box-shadow: var(--nm-inset-sm),
+              0 0 0 1.5px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .palette-search svg { color: var(--faint); flex-shrink: 0; }
 .palette-search input {
@@ -681,11 +753,13 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   opacity: 0.75;
 }
 
-/* add-widget icon grid */
+/* add-widget icon grid — convex keys that press in.
+   Raised shadows visually thicken every edge, so grids need wider gaps
+   than the flat design used or the keys read as touching. */
 .btns {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 7px;
+  gap: 11px;
 }
 .wbtn {
   display: flex;
@@ -697,59 +771,65 @@ main.portrait > .inspector { flex: 1; min-width: 0; }
   min-height: 48px;
   line-height: 1.1;
   text-align: center;
-  background: var(--bg-input);
+  background: var(--convex);
   color: var(--sub);
-  border: 1px solid var(--line-soft);
-  border-radius: 12px;
+  border: 0;
+  border-radius: 13px;
+  box-shadow: var(--nm-raise-sm);
   cursor: pointer;
   font-size: 10.5px;
   font-weight: 500;
   font-family: inherit;
-  transition: border-color 0.12s, color 0.12s, background 0.12s, transform 0.12s;
+  transition: color 0.12s, background 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 .wbtn:hover {
   color: var(--text);
-  border-color: rgba(77, 225, 255, 0.45);
-  background: rgba(77, 225, 255, 0.06);
   transform: translateY(-2px);
+  box-shadow: var(--nm-raise-hover);
 }
-.wbtn:active { transform: translateY(0) scale(0.95); }
+.wbtn:active {
+  transform: translateY(0);
+  background: var(--concave);
+  box-shadow: var(--nm-inset-sm);
+}
 .wbtn:hover svg { color: var(--accent); }
 /* Column-flex button: cancel the global `button svg { margin-right: 6px }`
    that assumes icon-then-text horizontal layout. Here the icon stacks
    ABOVE the label, so any horizontal margin visibly offsets it. */
 .wbtn svg { display: block; margin: 0; flex-shrink: 0; transition: color 0.12s; }
 
-/* generic controls */
+/* generic controls — raised soft keys; pressing sinks them in */
 button, .filebtn {
-  background: var(--bg-input);
+  background: var(--convex);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 11px;
+  border: 0;
+  border-radius: 12px;
   padding: 7px 12px;
+  box-shadow: var(--nm-raise-sm);
   cursor: pointer;
   font-size: 12.5px;
   font-family: inherit;
   font-weight: 500;
-  transition: border-color 0.12s, background 0.12s, transform 0.12s, box-shadow 0.12s;
+  transition: color 0.12s, background 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 button:hover, .filebtn:hover {
-  background: var(--bg-3);
-  border-color: rgba(77, 225, 255, 0.4);
+  color: var(--accent);
   transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--nm-raise-hover);
 }
 button:active, .filebtn:active {
-  transform: translateY(0) scale(0.97);
-  box-shadow: none;
+  transform: translateY(0);
+  background: var(--concave);
+  box-shadow: var(--nm-inset-sm);
   transition-duration: 0.05s;
 }
 button.danger {
-  background: rgba(255, 122, 138, 0.08);
-  border-color: rgba(255, 122, 138, 0.3);
+  background: linear-gradient(145deg,
+      color-mix(in srgb, var(--err) 12%, transparent),
+      color-mix(in srgb, var(--err) 4%, transparent)), var(--bg);
   color: var(--err);
 }
-button.danger:hover { background: rgba(255, 122, 138, 0.16); }
+button.danger:hover { color: var(--err); }
 button.wide { width: 100%; }
 button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
 .filebtn { display: inline-block; }
@@ -757,8 +837,8 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
 .row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 .row:last-child { margin-bottom: 0; }
 .row > span:first-child, label.row > :first-child {
@@ -774,19 +854,24 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
   font-variant-numeric: tabular-nums;
 }
 
+/* inputs — concave wells */
 .row input[type='text'], .row input:not([type]), .row input[type='number'], .row select {
   flex: 1;
   min-width: 0;
-  background: var(--bg-input);
+  background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 10px;
-  padding: 6px 9px;
+  box-shadow: var(--nm-inset-sm);
+  padding: 7px 9px;
   font-family: inherit;
   font-size: 12.5px;
   outline: none;
 }
-.row input:focus, .row select:focus { border-color: rgba(77, 225, 255, 0.55); }
+.row input:focus, .row select:focus {
+  box-shadow: var(--nm-inset-sm),
+              0 0 0 1.5px color-mix(in srgb, var(--accent) 35%, transparent);
+}
 .row select { cursor: pointer; }
 
 .row input[type='range'] {
@@ -799,9 +884,10 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
   width: 30px;
   height: 30px;
   padding: 0;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 10px;
-  background: none;
+  box-shadow: var(--nm-raise-sm);
+  background: var(--bg);
   cursor: pointer;
 }
 .row input[type='color']::-webkit-color-swatch-wrapper { padding: 3px; }
@@ -814,8 +900,8 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
 /* preset rows */
 .preset-item {
   display: flex;
-  gap: 6px;
-  margin-bottom: 7px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 .preset-item .name {
   flex: 1;
@@ -830,48 +916,53 @@ button svg, .filebtn svg { vertical-align: -2px; margin-right: 6px; }
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid rgba(77, 225, 255, 0.55);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 1px;
 }
 
 /* thin scrollbars everywhere */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background: #262c3c;
+  background: var(--scrollbar);
   border-radius: 99px;
   border: 3px solid var(--bg);
 }
-::-webkit-scrollbar-thumb:hover { background: #333b52; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------------------------------------- language toggle (header, right) */
 .lang-toggle {
   display: inline-flex;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
+  padding: 2px;
   overflow: hidden;
 }
 .lang-toggle button {
   border: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--muted);
-  padding: 5px 10px;
+  padding: 4px 10px;
+  border-radius: 8px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
-.lang-toggle button:hover { background: rgba(255, 255, 255, 0.05); color: var(--fg); }
+.lang-toggle button:hover { color: var(--fg); transform: none; }
+.lang-toggle button:active { background: transparent; box-shadow: none; }
 .lang-toggle button.on {
-  background: rgba(77, 225, 255, 0.14);
+  background: var(--convex);
+  box-shadow: 2px 2px 4px var(--sd), -1px -1px 2px var(--sl);
   color: var(--accent);
 }
 
-/* -------------------------------------------- update bell (header, right) */
+/* --------------------- small square icon buttons (header: theme + update) */
 .bell-wrap { position: relative; }
-.bell {
+.bell, .iconbtn {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -879,27 +970,23 @@ select:focus-visible {
   width: 30px;
   height: 30px;
   padding: 0;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  border: 0;
+  background: var(--convex);
+  box-shadow: var(--nm-raise-sm);
   color: var(--fg);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: background 120ms ease, box-shadow 120ms ease, color 120ms ease;
 }
-.bell svg { margin: 0; flex-shrink: 0; }
-.bell:hover { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
-.bell.has-update {
-  color: var(--warn);
-  border-color: rgba(255, 200, 97, 0.35);
-  background: rgba(255, 200, 97, 0.08);
-}
+.bell svg, .iconbtn svg { margin: 0; flex-shrink: 0; }
+.bell:hover, .iconbtn:hover { color: var(--accent); transform: none; }
+.bell:active, .iconbtn:active { transform: none; }
+.bell.has-update { color: var(--warn); }
 .bell.ready {
-  color: #ffd15a;
-  border-color: rgba(255, 200, 97, 0.55);
-  background: rgba(255, 200, 97, 0.12);
+  color: var(--amber);
   animation: bellPulse 2.4s ease-in-out infinite;
 }
-.bell.error { color: var(--err); border-color: rgba(255, 122, 138, 0.4); }
+.bell.error { color: var(--err); }
 .bell .spin { animation: spin 1s linear infinite; }
 
 .bell-badge {
@@ -916,7 +1003,7 @@ select:focus-visible {
   font-weight: 700;
   line-height: 16px;
   text-align: center;
-  box-shadow: 0 0 0 2px var(--panel);
+  box-shadow: 0 0 0 2px var(--bg);
 }
 .bell.ready .bell-badge { background: #ffb03a; }
 
@@ -926,11 +1013,10 @@ select:focus-visible {
   right: 0;
   width: 280px;
   padding: 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(20, 22, 32, 0.96);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+  border-radius: 14px;
+  background: var(--bg-3);
+  box-shadow: 0 14px 32px var(--sd),
+              0 1px 0 var(--sl) inset;
   z-index: 50;
   animation: fadeUp 140ms ease-out;
 }
@@ -944,35 +1030,32 @@ select:focus-visible {
   color: var(--fg);
   margin-bottom: 10px;
 }
-.bell-msg.ok { color: #ffd15a; }
+.bell-msg.ok { color: var(--amber); }
 .bell-msg.err { color: var(--err); }
 .bell-cta {
   width: 100%;
   padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 200, 97, 0.5);
-  background: linear-gradient(180deg, rgba(255, 200, 97, 0.2), rgba(255, 200, 97, 0.08));
-  color: #ffd884;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(255, 200, 97, 0.22), rgba(255, 200, 97, 0.07)), var(--bg);
+  color: var(--amber);
   font-weight: 600;
   cursor: pointer;
   transition: filter 120ms ease;
 }
-.bell-cta:hover { filter: brightness(1.15); }
+.bell-cta:hover { filter: brightness(1.06); color: var(--amber); }
 .bell-check {
   width: 100%;
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
   color: var(--fg);
   cursor: pointer;
 }
-.bell-check:hover { background: rgba(255, 255, 255, 0.08); }
 .bell-note { margin-top: 8px; font-size: 11px; color: var(--muted); }
 .bell-bar {
   height: 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg);
+  box-shadow: var(--nm-inset-sm);
   overflow: hidden;
   margin-bottom: 4px;
 }
@@ -985,16 +1068,16 @@ select:focus-visible {
 .bell-err-detail {
   margin-bottom: 8px;
   padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(255, 122, 138, 0.08);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--err) 8%, transparent);
   color: var(--muted);
   font-size: 11px;
   word-break: break-word;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes bellPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 200, 97, 0.35); }
-  50% { box-shadow: 0 0 0 5px rgba(255, 200, 97, 0); }
+  0%, 100% { box-shadow: var(--nm-raise-sm), 0 0 0 0 rgba(255, 200, 97, 0.35); }
+  50% { box-shadow: var(--nm-raise-sm), 0 0 0 5px rgba(255, 200, 97, 0); }
 }
 
 /* ---- context menu (canvas right-click) ---------------------------------- */
@@ -1006,10 +1089,10 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--panel, #14161d);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+  background: var(--bg-3);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px var(--sd),
+              0 1px 0 var(--sl) inset;
   animation: fadeUp 0.12s ease-out;
 }
 .ctx-menu button {
@@ -1020,13 +1103,16 @@ select:focus-visible {
   padding: 7px 10px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  box-shadow: none;
+  border-radius: 9px;
   text-align: left;
   font-size: 12.5px;
+  color: var(--text);
 }
-.ctx-menu button:hover { background: rgba(77, 225, 255, 0.10); }
+.ctx-menu button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); transform: none; box-shadow: none; }
+.ctx-menu button:active { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: none; }
 .ctx-menu button.danger { color: var(--err); }
-.ctx-menu button.danger:hover { background: rgba(255, 122, 138, 0.12); }
+.ctx-menu button.danger:hover { background: color-mix(in srgb, var(--err) 12%, transparent); }
 
 /* ---- layers: hover-only delete + drag reorder --------------------------- */
 .layers li button.danger {
@@ -1050,5 +1136,5 @@ select:focus-visible {
   max-height: 34px;
   object-fit: cover;
   border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--line);
 }

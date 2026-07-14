@@ -6,6 +6,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.15.0] — 2026-07-14
+
+### Added
+- **Light mode.** A sun/moon button at the right end of the header switches
+  between dark and light themes (saved across restarts; dark remains the
+  default). Accent and status colors automatically switch to darker variants
+  in light mode for readability.
+
+### Changed
+- **Editor UI redesigned as neumorphism (soft UI).** One surface color
+  everywhere; depth comes from paired light/dark shadows — cards and buttons
+  are raised (and sink in when pressed), inputs and lists are inset wells.
+  Borders are gone; states are shown with text/tint color instead.
+- Spacing between buttons, rows and cards widened across the board — raised
+  shadows visually thicken element edges, so the previous tight gaps read
+  as cramped.
+- The whole stylesheet is now variable-driven: themes only swap CSS custom
+  properties, and accent tints derive from the accent color via `color-mix()`.
+
 ## [1.14.1] — 2026-07-07
 
 ### Fixed
